@@ -1,0 +1,190 @@
+// Checks worker/import.ts: reading the state's sheet and planning an upload. Pure functions, no database.
+import assert from 'node:assert/strict';
+import {
+  type ExistingPerson,
+  ImportError,
+  normalizeKey,
+  parseCsv,
+  parseSheetDate,
+  planUpload,
+  readSheet,
+  splitAddress,
+} from '../worker/import.ts';
+import { sheetCsv } from './lib/sheet.ts';
+
+// --- CSV
+assert.deepEqual(parseCsv('a,b\n1,2\n'), [
+  ['a', 'b'],
+  ['1', '2'],
+]);
+assert.deepEqual(
+  parseCsv('a,b\r\n"x, y","say ""hi"""\r\n'),
+  [
+    ['a', 'b'],
+    ['x, y', 'say "hi"'],
+  ],
+  'quotes, doubled quotes, CRLF',
+);
+assert.deepEqual(
+  parseCsv('a,b\n"two\nlines",2'),
+  [
+    ['a', 'b'],
+    ['two\nlines', '2'],
+  ],
+  'a newline inside quotes, no final newline',
+);
+assert.deepEqual(
+  parseCsv('﻿a\tb\n1\t2\n\n'),
+  [
+    ['a', 'b'],
+    ['1', '2'],
+  ],
+  'a BOM, tabs and a blank line',
+);
+
+// --- keys: case, punctuation, accents and the middle name do not matter
+assert.equal(normalizeKey('Ana', 'Peña', '12 N 1st St., Tempe'), normalizeKey('ANA', 'PENA', '12 n 1st st tempe'));
+assert.notEqual(normalizeKey('Ana', 'Pena', '12 N 1st St'), normalizeKey('Ana', 'Pena', '14 N 1st St'));
+
+// --- addresses
+assert.deepEqual(splitAddress('3302 N 47TH PL PHOENIX, AZ 85018'), { city: 'Phoenix', zip: '85018' });
+assert.deepEqual(splitAddress('1 E MAIN ST APT 4 TEMPE, AZ 85281-1234'), { city: 'Tempe', zip: '85281' });
+assert.deepEqual(splitAddress('5 N RD PARADISE VALLEY, AZ 85253'), { city: 'Paradise Valley', zip: '85253' });
+assert.deepEqual(splitAddress('7 W RD SUN CITY WEST, AZ 85375'), { city: 'Sun City West', zip: '85375' }, 'the longest city wins');
+assert.deepEqual(splitAddress('9 W ELM ST NOWHEREVILLE, AZ 85000'), { city: '', zip: '85000' }, 'an unknown city stays blank');
+assert.deepEqual(splitAddress('no state or zip'), { city: '', zip: '' });
+
+// --- dates
+assert.equal(parseSheetDate('2026-10-21'), '2026-10-21');
+assert.equal(parseSheetDate('10/21/2026'), '2026-10-21');
+assert.equal(parseSheetDate('1/5/26 08:30'), '2026-01-05');
+assert.equal(parseSheetDate('2026-10-21T14:00:00Z'), '2026-10-21');
+assert.equal(parseSheetDate('13/40/2026'), null);
+assert.equal(parseSheetDate(''), null);
+assert.equal(parseSheetDate('soon'), null);
+
+// --- reading a sheet
+const sheet = readSheet(
+  sheetCsv([
+    { first: 'Ana', last: 'Lee', address: '3302 N 47TH PL PHOENIX, AZ 85018', precinct: 'ARCADIA', phone: '602-555-0101' },
+    { first: 'Bo', last: 'Ray', address: '1 E MAIN ST TEMPE, AZ 85281', legdist: '9' },
+    { first: 'Cy', last: 'Fox', address: '2 E MAIN ST TEMPE, AZ 85281', legdist: '08' },
+    { first: 'Di', last: 'Roe', address: '3 E MAIN ST TEMPE, AZ 85281', legdist: '' },
+    { first: '', last: 'Nobody', address: '4 E MAIN ST TEMPE, AZ 85281' },
+    { first: 'Ana', last: 'LEE', address: '3302 n 47th pl phoenix az 85018', statusDate: '10/25/2026' },
+  ]),
+);
+assert.equal(sheet.rows, 6);
+assert.equal(sheet.skippedOtherDistrict, 1, 'LD9 is skipped, "08" and a blank count as LD8');
+assert.equal(sheet.skippedInvalid, 1, 'no first name');
+assert.equal(sheet.duplicates, 1);
+assert.deepEqual(
+  sheet.people.map((p) => p.firstName),
+  ['Ana', 'Cy', 'Di'],
+);
+const ana = sheet.people[0];
+assert.ok(ana);
+assert.equal(ana.statusDate, '2026-10-25', 'a repeat keeps the later status date');
+assert.equal(ana.city, 'Phoenix');
+assert.equal(ana.precinct, 'ARCADIA');
+assert.equal(ana.phone, '602-555-0101');
+
+// The columns on the real sheets vary: only FIRST, LAST and ADDRESS are needed, in any order, in any case, with extra columns.
+const odd = readSheet('Address,extra,last,first\n"1 E MAIN ST TEMPE, AZ 85281",x,Ray,Bo\n');
+assert.equal(odd.people.length, 1);
+assert.ok(odd.warnings.some((w) => w.includes('STATUSDATE')));
+
+assert.throws(
+  () => readSheet('FIRST,LAST\nA,B\n'),
+  (e: unknown) => e instanceof ImportError && e.message.includes('ADDRESS'),
+);
+assert.throws(() => readSheet(''), ImportError);
+assert.throws(() => readSheet('FIRST,LAST,ADDRESS,LEGDIST\nA,B,C,9\n'), ImportError, 'nothing usable');
+
+// --- planning an upload
+const incoming = (first: string, address = '1 E MAIN ST TEMPE, AZ 85281', last = 'Roe') =>
+  readSheet(sheetCsv([{ first, last, address }])).people[0] ?? assert.fail('no person');
+const known = (
+  id: number,
+  first: string,
+  status: ExistingPerson['status'],
+  changedAt: string,
+  over: Partial<ExistingPerson> = {},
+): ExistingPerson => {
+  const p = incoming(first);
+  return { id, key: p.key, firstName: first, lastName: 'Roe', address: p.address, status, statusChangedAt: changedAt, flag: null, ...over };
+};
+const NOW = '2026-10-23T12:00:00.000Z';
+const PREVIOUS = '2026-10-22T12:00:00.000Z';
+
+{
+  const existing = [
+    known(1, 'Stays', 'needs_contact', '2026-10-01T00:00:00.000Z'),
+    known(2, 'Gone', 'left_voicemail', '2026-10-01T00:00:00.000Z'),
+    known(3, 'Done', 'cured', '2026-10-02T00:00:00.000Z'),
+    known(4, 'Back', 'cured', '2026-10-02T00:00:00.000Z'),
+    known(5, 'Retry', 'contacted', '2026-10-21T00:00:00.000Z'),
+    known(6, 'Recent', 'contacted', '2026-10-22T18:00:00.000Z'),
+  ];
+  const plan = planUpload(
+    [incoming('Stays'), incoming('Back'), incoming('Retry'), incoming('Recent'), incoming('Fresh')],
+    existing,
+    NOW,
+    PREVIOUS,
+  );
+  assert.deepEqual(
+    plan.inserts.map((p) => p.firstName),
+    ['Fresh'],
+  );
+  assert.deepEqual(plan.cures, [2], 'only the open person who left the sheet; the already cured one stays as is');
+  const by = (id: number) => plan.updates.find((u) => u.id === id);
+  assert.equal(by(1)?.status, 'needs_contact');
+  assert.equal(by(1)?.flag, null);
+  assert.deepEqual([by(4)?.status, by(4)?.flag], ['needs_contact', 'reappeared'], 'a cured person who is back is reopened and flagged');
+  assert.deepEqual([by(5)?.status, by(5)?.flag], ['needs_contact', 'still_uncured'], 'contacted before the last upload and still listed');
+  assert.deepEqual([by(6)?.status, by(6)?.flag], ['contacted', null], 'contacted since the last upload: give the state a day');
+  assert.equal(plan.stillUncured, 1);
+  assert.equal(plan.reappeared, 1);
+  assert.equal(plan.openBefore, 4);
+  assert.equal(plan.looksPartial, false);
+  assert.deepEqual(plan.audit.map((a) => a.action).sort(), ['import.reappeared', 'import.still_uncured']);
+}
+
+// The first upload ever flags nobody, and a contacted person stays contacted when there is no earlier upload to compare with.
+{
+  const plan = planUpload([incoming('A')], [known(1, 'A', 'contacted', '2026-10-01T00:00:00.000Z')], NOW, null);
+  assert.equal(plan.stillUncured, 0);
+}
+
+// A file that would cure most of the open people looks partial.
+{
+  const existing = Array.from({ length: 12 }, (_, i) => known(i + 1, `P${i}`, 'needs_contact', '2026-10-01T00:00:00.000Z'));
+  assert.equal(planUpload([incoming('P0')], existing, NOW, PREVIOUS).looksPartial, true);
+  assert.equal(
+    planUpload(
+      existing.slice(0, 8).map((e) => incoming(e.firstName)),
+      existing,
+      NOW,
+      PREVIOUS,
+    ).looksPartial,
+    false,
+  );
+}
+
+// A corrected record shows up as a possible match, and is not merged.
+{
+  const old = known(1, 'Jon', 'needs_contact', '2026-10-01T00:00:00.000Z');
+  const same = planUpload([incoming('John')], [old], NOW, PREVIOUS);
+  assert.deepEqual(
+    same.possibleMatches.map((m) => m.kind),
+    ['address'],
+  );
+  const moved = planUpload([incoming('Jon', '99 W OAK ST MESA, AZ 85201')], [old], NOW, PREVIOUS);
+  assert.deepEqual(
+    moved.possibleMatches.map((m) => m.kind),
+    ['moved'],
+  );
+  assert.deepEqual(moved.cures, [1]);
+}
+
+console.log('test-import: ok');
