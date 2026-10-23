@@ -38,9 +38,16 @@ npm run deploy
 
 Check it: open the site and sign in (you should see the welcome page asking for your name), then `/admin/` as an admin. A request that skips Access (the `workers.dev` hostname is off, `workers_dev: false`) gets the Worker's own 403.
 
-## 4. Releases (optional)
+## 4. Deploys on merge (optional)
 
-`ci-proposed/release.yml` runs the full CI (WebKit, Chromium and Firefox) on a `v*` tag and then deploys. To use it: move `ci-proposed/ci.yml` and `release.yml` to `.github/workflows/`, create a `production` environment that allows tags `v*`, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to it as secrets (a token limited to Workers Scripts edit on this account), and tag a commit on `main` (`git tag v0.1.0 && git push origin v0.1.0`). Run `npm run db:migrate` by hand first when the release adds a migration. **Actions > release > Run workflow** runs the same checks on any branch without deploying.
+The repository is public, so GitHub's standard runners are free, and `ci-proposed/` has two workflows:
+
+- `ci.yml` runs on every pull request: `checks` (typecheck, tests, Biome) and `smoke` in Chromium, Firefox and WebKit (Safari's engine) in parallel, with Lighthouse alongside Chromium. Require `checks`, `smoke (chromium)`, `smoke (firefox)` and `smoke (webkit)` before merging.
+- `deploy.yml` runs when something is merged to `main` and deploys the Worker. Run by hand (Actions > deploy > Run workflow) it redeploys `main`.
+
+To use them: move both to `.github/workflows/`, create a `production` environment that allows only the `main` branch, and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to it as secrets (a token limited to editing Workers Scripts on this account). The deploy does not run database migrations: run `npm run db:migrate` by hand before merging a change that adds one.
+
+The repository being public means everything in it is public. Nothing here is secret: the Access team domain and audience tag in `wrangler.jsonc` are not (the Worker checks the token's signature, not these values), the admins' emails are a Worker secret, and voter data never goes in the repo. The `pull_request` workflow gets no secrets for pull requests from forks.
 
 ## 5. Before the real data: turn the reset off
 

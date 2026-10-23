@@ -2,29 +2,16 @@ name: ci
 on:
   pull_request:
     types: [opened, reopened, synchronize]
-  workflow_call:
-    # release.yml calls this file on a version tag with all three browsers. A pull request runs Chromium only: the checks that
-    # should be required are `checks` and `smoke (chromium)`.
-    inputs:
-      browsers:
-        description: JSON array of Playwright browsers for the smoke job
-        type: string
-        default: '["chromium"]'
-      runner:
-        description: runs-on label for the WebKit and Firefox smoke jobs (release.yml chooses it; Chromium is always ubuntu-latest)
-        type: string
-        default: ubuntu-slim
 concurrency:
-  # Pull requests: a newer push cancels the older run (CI minutes are billed). Called from release.yml (event_name is then the
-  # caller's, so not pull_request): a group of its own per run, never cancelled, and it cannot clash with the caller's.
-  group: ${{ github.event_name == 'pull_request' && format('ci-{0}', github.ref) || format('ci-call-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer push to a pull request cancels the older run.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   checks:
-    # Everything that needs no browser, in one job: each job pays for its own checkout and `npm ci`. Steps after `npm ci` run even
-    # when an earlier one failed (`!cancelled()`), so one run reports every finding.
+    # Everything that needs no browser, in one job. Steps after `npm ci` run even when an earlier one failed (`!cancelled()`), so one
+    # run reports every finding. Standard GitHub-hosted runners are free for a public repository, so every job is on `ubuntu-latest`.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,7 +24,7 @@ jobs:
       - name: Types for the Worker, the pages and the tools
         run: npm run typecheck
         if: ${{ !cancelled() }}
-      - name: Tests (Access token check, sheet import, API, Lighthouse budget rules)
+      - name: Tests (Access token check, sheet import, wording, API, Lighthouse budget rules)
         run: npm test
         if: ${{ !cancelled() }}
       - name: Biome
@@ -46,16 +33,15 @@ jobs:
         if: ${{ !cancelled() }}
 
   smoke:
-    # Pull requests: Chromium. Releases: WebKit (Safari's engine), Chromium and Firefox as separate parallel jobs, so the wait is one
-    # browser's. The smoke test is a real browser through every flow, with axe in light and dark at phone and desktop width.
-    # Chromium always runs on `ubuntu-latest`: it carries Lighthouse, whose blocking time spikes on a 1 vCPU runner. WebKit and
-    # Firefox take the label release.yml passes (fallback `ubuntu-slim`: about 1.7 times slower, but a slim minute counts for a third).
-    runs-on: ${{ matrix.browser == 'chromium' && 'ubuntu-latest' || inputs.runner || 'ubuntu-slim' }}
-    timeout-minutes: 15 # the most a slim runner allows
+    # The smoke test is a real browser through every flow, with axe in light and dark at phone and desktop width. It runs in
+    # Chromium, Firefox and WebKit (Safari's engine) as parallel jobs, on every pull request, so the wait is one browser's.
+    # Lighthouse runs with Chromium, which it drives.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        browser: ${{ fromJSON(inputs.browsers || '["chromium"]') }}
+        browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -68,6 +54,5 @@ jobs:
         env:
           SMOKE_BROWSER: ${{ matrix.browser }}
       - name: Lighthouse budgets
-        # Chromium only: Lighthouse drives Chromium.
-        if: matrix.browser == 'chromium'
+        if: ${{ matrix.browser == 'chromium' && !cancelled() }}
         run: npm run lighthouse
