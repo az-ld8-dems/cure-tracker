@@ -1,94 +1,11 @@
-/* The cure tracker's styles. Tokens, type and component shapes follow the Arizona LD8 Democrats design system (warm paper ground, logo blue,
-   copper for the one call to action, Barlow Condensed headings, Public Sans body); see docs/design.md. Light and dark follow the browser. */
+/* The cure tracker's own styles: the LD8 pieces the design doc defines (page ground, header, kicker, headings, buttons) and the few
+   app-specific rules. Everything else is Frostline's components (vendor/frostline, loaded before this file inside @layer frostline,
+   so a plain rule here wins). Tokens are in tokens.css; docs/design.md has the rules.
 
-@font-face {
-  font-family: "Barlow Condensed";
-  src: url("/fonts/BarlowCondensed-Bold-latin.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Public Sans";
-  src: url("/fonts/PublicSans-Variable-latin.woff2") format("woff2");
-  font-weight: 400 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-:root {
-  color-scheme: light dark;
-  --bg: #faf7f2;
-  --surface: #f1ece3;
-  --surface-raised: #fff;
-  --ink: #14202e;
-  --muted: #4a5566;
-  --border: #d9d2c5;
-  --border-strong: #7a8394;
-  --brand: #1f497d;
-  --brand-strong: #12294a;
-  --brand-tint: #e3ebf5;
-  --on-brand: #fff;
-  --accent: #b4501f;
-  --accent-strong: #8a3a13;
-  --on-accent: #fff;
-  --sun: #f2b84b;
-  --deep: #12294a;
-  --on-deep: #fff;
-  --focus: #1f497d;
-  --success: #2f6b4f;
-  --danger: #a3262a;
-  --shadow-card: 0 1px 2px #14202e1f, 0 4px 12px #14202e14;
-  --shadow-header: 0 2px 0 #d9d2c5;
-  --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
-  --font-sans: "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --space-3xs: 2px;
-  --space-2xs: 4px;
-  --space-xs: 8px;
-  --space-sm: 12px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-2xl: 48px;
-  --space-3xl: 72px;
-  --radius-sm: 4px;
-  --radius: 8px;
-  --radius-lg: 16px;
-  --radius-pill: 999px;
-  --container-max: 72rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1a2b;
-    --surface: #162539;
-    --surface-raised: #1c2f47;
-    --ink: #eef2f7;
-    --muted: #a9b6c8;
-    --border: #2f4560;
-    --border-strong: #7f93ad;
-    --brand: #8db4e8;
-    --brand-strong: #b9d3f3;
-    --brand-tint: #1d3250;
-    --on-brand: #0e1a2b;
-    --accent: #f2a36b;
-    --accent-strong: #f7bf94;
-    --on-accent: #1a0e06;
-    --deep: #0a1322;
-    --focus: #8db4e8;
-    --success: #7fcf9f;
-    --danger: #f19a9a;
-    --shadow-card: 0 1px 2px #00000066;
-    --shadow-header: 0 2px 0 #2f4560;
-  }
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+   Spacing (Frostline's rules; the LD8 doc only gives the scale): space comes from `gap` on a container, never from margins on its
+   children, so headings, paragraphs and lists here have no margins. fl-stack is the column (space-4; --3, --6, --8 for the other roles):
+   space-3 between blocks in a card, a heading and its content, and list items; space-4 for card padding and form gaps; space-6
+   between cards and tiles; space-8 between page sections. Only these steps; never an in-between value. */
 
 html {
   -webkit-text-size-adjust: 100%;
@@ -103,32 +20,52 @@ body {
   font: 400 16px / 26px var(--font-sans);
 }
 
-a {
-  color: var(--brand);
-}
-
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-.skip {
-  position: absolute;
-  left: var(--space-md);
-  top: -100px;
-  z-index: 20;
-  padding: var(--space-xs) var(--space-md);
-  background: var(--brand);
-  color: var(--on-brand);
-  border-radius: var(--radius);
+a {
+  color: var(--brand);
 }
 
-.skip:focus {
-  top: var(--space-xs);
+h1,
+h2,
+h3,
+p {
+  margin: 0;
 }
 
-/* Header */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: 48px;
+  line-height: 50px;
+}
+
+h2 {
+  font-size: 36px;
+  line-height: 40px;
+}
+
+h3 {
+  font-size: 26px;
+  line-height: 30px;
+}
+
+/* The LD8 card title is Barlow 26/30 (h3 in the design doc); Frostline's card is the container. */
+.fl-card .fl-card__title {
+  font: 700 26px / 30px var(--font-display);
+}
+
+/* Header: the LD8 header, a hard 2px line below it */
 .site-header {
   position: sticky;
   top: 0;
@@ -189,49 +126,14 @@ a {
   line-height: 20px;
 }
 
-/* Page */
-main {
-  max-width: var(--container-max);
-  margin: 0 auto;
-  padding: var(--space-lg) max(var(--space-md), env(safe-area-inset-right, 0px)) var(--space-3xl)
-    max(var(--space-md), env(safe-area-inset-left, 0px));
-}
-
-@media (min-width: 48em) {
-  main {
-    padding-top: var(--space-xl);
-  }
-}
-
-h1,
-h2,
-h3 {
-  font-family: var(--font-display);
-  font-weight: 700;
-  text-wrap: balance;
-  margin: 0;
-}
-
-h1 {
-  font-size: 48px;
-  line-height: 50px;
-}
-
-h2 {
-  font-size: 36px;
-  line-height: 40px;
-  margin-top: var(--space-2xl);
-  margin-bottom: var(--space-sm);
-}
-
-h3 {
-  font-size: 26px;
-  line-height: 30px;
+/* Page: Frostline's frame (fl-page), with room below for a phone's home indicator */
+.page {
+  padding-block: var(--space-6) var(--space-3xl);
 }
 
 .kicker {
   display: inline-block;
-  margin: 0 0 var(--space-2xs);
+  align-self: start;
   font: 700 13px / 16px var(--font-sans);
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -241,18 +143,13 @@ h3 {
 }
 
 .lead {
-  margin: var(--space-xs) 0 0;
   max-width: 68ch;
   font-size: 20px;
   line-height: 30px;
   color: var(--muted);
 }
 
-.muted {
-  color: var(--muted);
-}
-
-/* Buttons */
+/* Buttons: the LD8 button. The small and ghost-in-a-row buttons are Frostline's (fl-btn fl-btn--sm). */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -275,30 +172,14 @@ h3 {
 }
 
 .btn--accent {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background: var(--ld8-accent);
+  border-color: var(--ld8-accent);
+  color: var(--ld8-on-accent);
 }
 
 .btn--accent:hover {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-.btn--ghost {
-  background: transparent;
-  color: var(--brand);
-}
-
-.btn--ghost:hover {
-  background: var(--brand-tint);
-  color: var(--brand-strong);
-}
-
-.btn--small {
-  min-height: 36px;
-  padding: var(--space-2xs) var(--space-sm);
-  font-size: 14px;
+  background: var(--ld8-accent-strong);
+  border-color: var(--ld8-accent-strong);
 }
 
 .btn[disabled] {
@@ -306,97 +187,40 @@ h3 {
   cursor: not-allowed;
 }
 
-/* Forms */
-label {
-  font-weight: 600;
-}
-
-input,
-select,
-textarea {
-  min-height: 44px;
-  padding: var(--space-xs) var(--space-sm);
-  border: 2px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface-raised);
-  color: var(--ink);
-  font: 400 16px / 20px var(--font-sans);
-  max-width: 100%;
-}
-
-textarea {
-  width: 100%;
-  min-height: 88px;
-}
-
-.field {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-2xs);
-}
-
-.filters {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  gap: var(--space-sm);
-  margin: var(--space-lg) 0;
-  padding: var(--space-md);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-}
-
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-xs) var(--space-sm);
-}
-
-/* Person cards */
-.cards {
-  display: grid;
-  gap: var(--space-md);
-  grid-template-columns: 1fr;
-  margin: var(--space-lg) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-@media (min-width: 48em) {
-  .cards {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.card {
-  display: grid;
-  gap: var(--space-sm);
-  align-content: start;
-  padding: var(--space-lg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-card);
-}
-
-.card__title {
+/* People: a grid of Frostline cards, wide enough for the status buttons */
+.people,
+.tiles {
   margin: 0;
-  font-size: 26px;
-  line-height: 30px;
+  padding: 0;
+  list-style-type: "\200B"; /* an invisible marker keeps the list a list for VoiceOver (see Frostline's fl-list) */
 }
 
-.card__head {
+.people {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+}
+
+.tiles {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--space-3);
+}
+
+/* Frostline sizes its own buttons to their content inside a card; the LD8 button should too */
+.fl-card > .btn {
+  justify-self: start;
+}
+
+/* The three status buttons share the card's width, and their words wrap inside them */
+.status-seg {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-xs);
+}
+
+.status-seg button {
+  flex: 1 1 0;
 }
 
 .facts {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: var(--space-3xs) var(--space-md);
   margin: 0;
 }
@@ -410,88 +234,12 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.pill {
-  display: inline-block;
-  padding: 0 var(--space-sm);
-  border: 2px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  background: var(--surface-raised);
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 22px;
-  white-space: nowrap;
-}
-
-.pill--needs_contact {
-  border-color: var(--accent);
-}
-
-.pill--left_voicemail {
-  border-color: var(--sun);
-}
-
-.pill--contacted {
-  border-color: var(--brand);
-}
-
-.pill--cured {
-  border-color: var(--success);
-}
-
-.flag {
-  display: inline-block;
-  padding: 0 var(--space-sm);
-  border: 2px solid var(--danger);
-  border-radius: var(--radius-pill);
-  color: var(--danger);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 22px;
-}
-
-.seg {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.seg legend {
-  padding: 0;
-  margin-bottom: var(--space-2xs);
-  font-weight: 600;
-}
-
-.seg button[aria-pressed="true"] {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: var(--on-brand);
-}
-
-details > summary {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--brand);
-}
-
 .notes {
   display: grid;
   gap: var(--space-sm);
-  margin: 0 0 var(--space-sm);
+  margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.notes li {
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius);
-  background: var(--surface);
 }
 
 .notes small {
@@ -499,135 +247,7 @@ details > summary {
   color: var(--muted);
 }
 
-.empty {
-  margin: var(--space-xl) 0;
-  padding: var(--space-lg);
-  border: 2px dashed var(--border-strong);
-  border-radius: var(--radius-lg);
-  text-align: center;
-}
-
-.summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs) var(--space-lg);
-  margin: var(--space-md) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.summary strong {
-  font: 700 28px / 30px var(--font-display);
-  margin-right: var(--space-2xs);
-}
-
-/* Admin tables */
-.table-scroll {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 15px;
-  line-height: 22px;
-}
-
-th,
-td {
-  padding: var(--space-xs) var(--space-sm);
-  text-align: left;
-  vertical-align: top;
-  border-bottom: 1px solid var(--border);
-}
-
-th {
-  font-weight: 700;
-  background: var(--surface);
-}
-
-td.num,
-th.num {
-  text-align: right;
-}
-
-tbody tr:last-child td {
-  border-bottom: 0;
-}
-
-.panel {
-  padding: var(--space-lg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-card);
-}
-
-.callout {
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius);
-  background: var(--brand-tint);
-  border: 1px solid var(--border);
-}
-
-.callout--warn {
-  border: 2px solid var(--danger);
-}
-
-.callout ul {
-  margin: var(--space-xs) 0 0;
-  padding-left: var(--space-lg);
-}
-
-/* Messages */
-.toasts {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: max(var(--space-md), env(safe-area-inset-bottom, 0px));
-  z-index: 30;
-  display: grid;
-  justify-items: center;
-  gap: var(--space-xs);
-  padding: 0 var(--space-md);
-  pointer-events: none;
-}
-
-.toast {
-  max-width: 36rem;
-  padding: var(--space-sm) var(--space-lg);
-  border-radius: var(--radius);
-  background: var(--deep);
-  color: var(--on-deep);
-  box-shadow: var(--shadow-card);
-  pointer-events: auto;
-}
-
-.toast--error {
-  border: 2px solid var(--danger);
-}
-
-.status-line {
-  min-height: 26px;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .btn {
-    transition: background-color 0.12s;
-  }
-}
-
-@media print {
-  .site-header,
-  .toasts {
-    display: none;
-  }
-}
-
-/* Last, so that it beats the display rules above. */
+/* Last, so that it beats the display rules above and in Frostline. */
 [hidden] {
   display: none;
 }

@@ -21,5 +21,5 @@
     "rootDir": ".",
     "outDir": "../public/js"
   },
-  "include": ["."]
+  "include": [".", "../vendor/frostline/components/index.d.ts"]
 }

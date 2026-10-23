@@ -7,11 +7,14 @@
     <meta name="description" content="The voters you have claimed to help cure their ballots.">
     <meta name="theme-color" content="#1f497d">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/tokens.css">
+    <link rel="stylesheet" href="/frostline/1.11/components/bundle.css">
     <link rel="stylesheet" href="/app.css">
     <link rel="preload" href="/fonts/PublicSans-Variable-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <script src="/frostline/1.11/components/bundle.js" defer></script>
   </head>
   <body>
-    <a class="skip" href="#main">Skip to content</a>
+    <a class="fl-skip" href="#main">Skip to content</a>
     <header class="site-header">
       <div class="site-header__in">
         <a class="site-header__brand" href="/">
@@ -30,12 +33,13 @@
         </nav>
       </div>
     </header>
-    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
-    <main id="main">
-      <p class="kicker">Ballot curing</p>
-      <h1>My people</h1>
-      <p class="lead">The voters you have claimed. Call or text them, say how it went, and leave a note for whoever comes next.</p>
-      <div id="app" class="status-line">Loading your people…</div>
+    <main id="main" class="fl-page page fl-stack fl-stack--8">
+      <div class="fl-stack fl-stack--3">
+        <p class="kicker">Ballot curing</p>
+        <h1>My people</h1>
+        <p class="lead">The voters you have claimed. Call or text them, say how it went, and leave a note for whoever comes next.</p>
+      </div>
+      <div id="app" class="fl-stack fl-stack--8"><p class="fl-help">Loading your people…</p></div>
     </main>
     <script type="module" src="/js/mine.js"></script>
   </body>

@@ -58,11 +58,9 @@ export function $(selector: string): HTMLElement {
   return el;
 }
 
+// Feedback for an action, through Frostline's toast (it announces itself to screen readers). Errors stay a little longer.
 export function toast(message: string, kind: 'ok' | 'error' = 'ok'): void {
-  const box = $('#toasts');
-  const t = h('p', { class: kind === 'error' ? 'toast toast--error' : 'toast' }, message);
-  box.append(t);
-  setTimeout(() => t.remove(), kind === 'error' ? 8000 : 4000);
+  window.Frostline.toast(message, { ms: kind === 'error' ? 7000 : 3500 });
 }
 
 export const failureText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -114,8 +112,53 @@ export const plural = (n: number, one: string, many = `${one}s`): string => `${n
 
 export const daysText = (p: Person): string => (p.daysUncured === null ? 'Unknown' : plural(p.daysUncured, 'day'));
 
-export function statusPill(status: Status): HTMLElement {
-  return h('span', { class: `pill pill--${status}` }, statusLabel(status));
+const STATUS_BADGES: Record<Status, string> = {
+  needs_contact: 'fl-badge fl-badge--warning',
+  left_voicemail: 'fl-badge',
+  contacted: 'fl-badge fl-badge--accent',
+  cured: 'fl-badge fl-badge--success',
+};
+
+export function statusBadge(status: Status): HTMLElement {
+  return h('span', { class: STATUS_BADGES[status] }, statusLabel(status));
+}
+
+export const flagBadge = (flag: Flag): HTMLElement => h('span', { class: 'fl-badge fl-badge--danger' }, flagLabel(flag));
+
+// A tinted note with words in it (Frostline's banner). warn is for a problem and is announced at once.
+export function banner(kind: 'info' | 'warn', ...children: Child[]): HTMLElement {
+  return h(
+    'div',
+    { class: kind === 'warn' ? 'fl-banner fl-banner--warn' : 'fl-banner', role: kind === 'warn' ? 'alert' : undefined },
+    ...children,
+  );
+}
+
+// A page section: a heading, then its content, a space-3 apart.
+export function section(id: string, title: string, ...children: Child[]): HTMLElement {
+  return h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': id }, h('h2', { id }, title), ...children);
+}
+
+// A labelled form control in Frostline's field: label, control, optional help line.
+export function field(id: string, label: string, control: HTMLElement, help?: string): HTMLElement {
+  return h(
+    'div',
+    { class: 'fl-field' },
+    h('label', { class: 'fl-label', for: id }, label),
+    control,
+    help ? h('p', { class: 'fl-help' }, help) : null,
+  );
+}
+
+// A row of Frostline stat tiles: a number and what it counts.
+export function tiles(...items: [number | string, string][]): HTMLElement {
+  return h(
+    'ul',
+    { class: 'fl-grid tiles', 'aria-label': 'Totals' },
+    ...items.map(([value, label]) =>
+      h('li', { class: 'fl-tile' }, h('div', { class: 'fl-tile__label' }, label), h('div', { class: 'fl-tile__value' }, String(value))),
+    ),
+  );
 }
 
 // The rows of facts about a person that every card shows.
@@ -144,7 +187,7 @@ export async function boot(): Promise<Me | null> {
     me = await api<Me>('GET', '/api/me');
   } catch (e) {
     const app = document.querySelector('#app');
-    if (app) clear(app, h('p', { class: 'callout callout--warn', role: 'alert' }, failureText(e)));
+    if (app) clear(app, banner('warn', h('p', {}, failureText(e))));
     return null;
   }
   $('#nav-admin').hidden = !me.isAdmin;
@@ -153,11 +196,11 @@ export async function boot(): Promise<Me | null> {
 
   const app = document.querySelector('#app');
   if (!app) return me;
-  const input = h('input', { id: 'name', name: 'name', autocomplete: 'name', required: true, maxlength: 80 });
+  const input = h('input', { class: 'fl-input', id: 'name', name: 'name', autocomplete: 'name', required: true, maxlength: 80 });
   const form = h(
     'form',
     {
-      class: 'panel field',
+      class: 'fl-card',
       onsubmit: async (event) => {
         event.preventDefault();
         try {
@@ -168,18 +211,16 @@ export async function boot(): Promise<Me | null> {
         }
       },
     },
-    h('h2', {}, 'Welcome'),
+    h('h2', { class: 'fl-card__title' }, 'Welcome'),
     h(
       'p',
       {},
       `You are signed in as ${me.email}. What should we call you? Other volunteers and admins will see this name next to the people you claim.`,
     ),
-    h('label', { for: 'name' }, 'Your name'),
-    input,
-    h('div', {}, h('button', { class: 'btn btn--accent', type: 'submit' }, 'Continue')),
+    field('name', 'Your name', input),
+    h('button', { class: 'btn btn--accent', type: 'submit' }, 'Continue'),
   );
   clear(app, form);
-  app.classList.remove('status-line');
   return null;
 }
 

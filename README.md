@@ -6,7 +6,7 @@ Assigns LD8 volunteers to voters whose ballots need curing, so nobody calls the 
 - **Admins** upload the state's sheet (the LD8 tab as CSV) whenever new data arrives, see how curing is going per volunteer, answer flagged people, move people between volunteers and read the audit log.
 - Everyone signs in through Cloudflare Access (Google, or a one-time PIN by email for volunteers without a Google account). Everyone sees every person; volunteers change only their own claims.
 
-How it works is in [docs/spec.md](docs/spec.md); setting it up on Cloudflare is in [docs/setup.md](docs/setup.md); where the look comes from is in [docs/design.md](docs/design.md). Agents read [CLAUDE.md](CLAUDE.md).
+How it works is in [docs/spec.md](docs/spec.md); setting it up on Cloudflare is in [docs/setup.md](docs/setup.md); how it looks, and which design system supplies what, is in [docs/design.md](docs/design.md). Agents read [CLAUDE.md](CLAUDE.md).
 
 ## Stack
 
@@ -16,6 +16,7 @@ One Cloudflare Worker serves the static pages, a JSON API and the Access check, 
 worker/      the Worker: access.ts (Access JWT check), api.ts, import.ts (the sheet), uploads.ts
 src/         the pages' TypeScript, compiled to public/js/ by tools/build.sh
 public/      HTML, CSS, fonts, logos
+vendor/frostline/   a copy of avi.me's Frostline components (docs/design.md)
 db/migrations/   D1 schema
 tools/       dev server, tests, smoke test, Lighthouse
 ```

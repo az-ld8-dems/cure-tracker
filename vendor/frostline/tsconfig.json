@@ -1,0 +1,21 @@
+{
+  // Frostline's behavior helpers are written in TypeScript (decision 36) and compiled one file to one file: components/bundle.ts
+  // becomes components/bundle.js next to it, which tools/build.sh does and the apps and the artifact copy. The .js is gitignored.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": [],
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "erasableSyntaxOnly": true,
+    "noEmitOnError": true,
+    "removeComments": true,
+    "newLine": "lf",
+    "skipLibCheck": true,
+    "rootDir": "components"
+  },
+  "files": ["components/bundle.ts"]
+}

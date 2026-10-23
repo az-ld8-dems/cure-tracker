@@ -5,16 +5,19 @@ import {
   $,
   ApiFailure,
   api,
+  banner,
   boot,
   clear,
   dateTime,
   failureText,
-  flagLabel,
+  field,
+  flagBadge,
   h,
   loadVolunteers,
   personName,
   plural,
   statusLabel,
+  tiles,
   toast,
   volunteerName,
 } from './common.ts';
@@ -23,36 +26,40 @@ const me = await boot();
 const app = $('#app');
 
 if (me && !me.isAdmin) {
-  clear(app, h('p', { class: 'callout callout--warn', role: 'alert' }, 'This page is for admins.'));
+  clear(app, banner('warn', h('p', {}, 'This page is for admins.')));
 } else if (me) {
   let volunteers = new Map<number, Volunteer>();
   const sections = {
-    upload: h('section', { 'aria-labelledby': 'h-upload' }),
-    settings: h('section', { 'aria-labelledby': 'h-settings' }),
-    stats: h('section', { 'aria-labelledby': 'h-stats' }),
-    flagged: h('section', { 'aria-labelledby': 'h-flagged' }),
-    volunteers: h('section', { 'aria-labelledby': 'h-volunteers' }),
-    find: h('section', { 'aria-labelledby': 'h-find' }),
-    audit: h('section', { 'aria-labelledby': 'h-audit' }),
+    upload: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-upload' }),
+    settings: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-settings' }),
+    stats: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-stats' }),
+    flagged: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-flagged' }),
+    volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
+    find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
+    audit: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-audit' }),
   };
 
   const heading = (id: string, text: string) => h('h2', { id }, text);
   const table = (label: string, head: string[], rows: (Node | string)[][], numeric: number[] = []) =>
     h(
       'div',
-      { class: 'table-scroll', role: 'region', 'aria-label': label, tabindex: '0' },
+      { class: 'fl-table-wrap', role: 'region', 'aria-label': label, tabindex: '0' },
       h(
         'table',
-        {},
-        h('thead', {}, h('tr', {}, ...head.map((t, i) => h('th', { scope: 'col', class: numeric.includes(i) ? 'num' : undefined }, t)))),
-        h('tbody', {}, ...rows.map((r) => h('tr', {}, ...r.map((c, i) => h('td', { class: numeric.includes(i) ? 'num' : undefined }, c))))),
+        { class: 'fl-table' },
+        h('thead', {}, h('tr', {}, ...head.map((t, i) => h('th', { scope: 'col', class: numeric.includes(i) ? 'fl-num' : undefined }, t)))),
+        h(
+          'tbody',
+          {},
+          ...rows.map((r) => h('tr', {}, ...r.map((c, i) => h('td', { class: numeric.includes(i) ? 'fl-num' : undefined }, c)))),
+        ),
       ),
     );
 
   const volunteerSelect = (id: string, current: number | null, none: string, exclude?: number): HTMLSelectElement =>
     h(
       'select',
-      { id },
+      { class: 'fl-select', id },
       h('option', { value: '' }, none),
       ...[...volunteers.values()]
         .filter((v) => v.id !== exclude)
@@ -62,31 +69,30 @@ if (me && !me.isAdmin) {
 
   // ---- upload
   function uploadSection(): void {
-    const file = h('input', { id: 'sheet', type: 'file', accept: '.csv,text/csv,text/plain' });
-    const result = h('div', { role: 'status' });
+    const file = h('input', { class: 'fl-input', id: 'sheet', type: 'file', accept: '.csv,text/csv,text/plain' });
+    const result = h('div', { class: 'fl-stack', role: 'status' });
     let csv = '';
     let filename = '';
 
     const show = (...children: (Node | null)[]) => clear(result, ...children);
     const problem = (e: unknown): HTMLElement => {
       const failure = e instanceof ApiFailure ? e : null;
-      return h(
-        'div',
-        { class: 'callout callout--warn', role: 'alert' },
-        h('strong', {}, failureText(e)),
-        failure && failure.problems.length > 0 ? h('ul', {}, ...failure.problems.map((t) => h('li', {}, t))) : null,
+      return banner(
+        'warn',
+        h('p', {}, h('strong', {}, failureText(e))),
+        failure && failure.problems.length > 0 ? h('ul', { class: 'fl-list' }, ...failure.problems.map((t) => h('li', {}, t))) : null,
       );
     };
 
     async function check(): Promise<void> {
       const chosen = file.files?.[0];
       if (!chosen) {
-        show(h('p', { class: 'callout callout--warn', role: 'alert' }, 'Choose the CSV file first.'));
+        show(banner('warn', h('p', {}, 'Choose the CSV file first.')));
         return;
       }
       filename = chosen.name;
       csv = await chosen.text();
-      show(h('p', { class: 'muted' }, 'Checking the file…'));
+      show(h('p', { class: 'fl-help' }, 'Checking the file…'));
       try {
         showPreview(await api<UploadPreview>('POST', '/api/admin/uploads/preview', { csv, filename }));
       } catch (e) {
@@ -107,7 +113,7 @@ if (me && !me.isAdmin) {
               const done = await api<UploadPreview & { id: number }>('POST', '/api/admin/uploads', { csv, filename, force: force.checked });
               toast(`Upload ${done.id} applied: ${p.added} added, ${p.cured} cured.`);
               file.value = '';
-              show(h('p', { class: 'callout' }, `Uploaded. ${p.added} added, ${p.cured} cured, ${p.stillUncured + p.reappeared} flagged.`));
+              show(banner('info', h('p', {}, `Uploaded. ${p.added} added, ${p.cured} cured, ${p.stillUncured + p.reappeared} flagged.`)));
               await refresh();
             } catch (e) {
               go.disabled = false;
@@ -118,36 +124,33 @@ if (me && !me.isAdmin) {
         'Upload this file',
       );
       show(
-        h(
-          'ul',
-          { class: 'summary' },
-          h('li', {}, h('strong', {}, String(p.added)), 'new people'),
-          h('li', {}, h('strong', {}, String(p.updated)), 'already known'),
-          h('li', {}, h('strong', {}, String(p.cured)), 'become cured'),
-          h('li', {}, h('strong', {}, String(p.stillUncured)), 'unsuccessful cures'),
-          h('li', {}, h('strong', {}, String(p.reappeared)), 'back after being cured'),
+        tiles(
+          [p.added, 'New people'],
+          [p.updated, 'Already known'],
+          [p.cured, 'Become cured'],
+          [p.stillUncured, 'Unsuccessful cures'],
+          [p.reappeared, 'Back after being cured'],
         ),
         h(
           'p',
-          { class: 'muted' },
+          { class: 'fl-help' },
           `${plural(p.rows, 'row')} read. Left out: ${p.skippedOtherDistrict} from other districts, ${p.skippedInvalid} without a name or address, ${p.duplicates} repeated.`,
         ),
         p.warnings.length > 0
-          ? h(
-              'div',
-              { class: 'callout callout--warn' },
-              h('strong', {}, 'Check before uploading'),
-              h('ul', {}, ...p.warnings.map((w) => h('li', {}, w))),
+          ? banner(
+              'warn',
+              h('p', {}, h('strong', {}, 'Check before uploading')),
+              h('ul', { class: 'fl-list' }, ...p.warnings.map((w) => h('li', {}, w))),
             )
           : null,
         p.possibleMatchCount > 0
           ? h(
               'div',
-              {},
+              { class: 'fl-stack fl-stack--3' },
               h('h3', {}, 'Possible matches'),
               h(
                 'p',
-                { class: 'muted' },
+                { class: 'fl-help' },
                 'A new person next to someone who disappeared. If they are the same person, they will be cured and re-added as new, and their notes stay on the old record.',
               ),
               table(
@@ -160,20 +163,20 @@ if (me && !me.isAdmin) {
                 ]),
               ),
               p.possibleMatchCount > p.possibleMatches.length
-                ? h('p', { class: 'muted' }, `And ${p.possibleMatchCount - p.possibleMatches.length} more.`)
+                ? h('p', { class: 'fl-help' }, `And ${p.possibleMatchCount - p.possibleMatches.length} more.`)
                 : null,
             )
           : null,
         p.looksPartial
           ? h(
-              'div',
-              { class: 'row' },
+              'label',
+              { class: 'fl-check', for: 'force' },
               force,
-              h('label', { for: 'force' }, `Upload it anyway. I know this cures ${p.cured} of ${p.openBefore} people.`),
+              `Upload it anyway. I know this cures ${p.cured} of ${p.openBefore} people.`,
             )
           : null,
-        h('div', {}, go),
-        h('p', { class: 'muted' }, `Cities found: ${p.cities.map((c) => `${c.city || 'unknown'} (${c.count})`).join(', ')}.`),
+        go,
+        h('p', { class: 'fl-help' }, `Cities found: ${p.cities.map((c) => `${c.city || 'unknown'} (${c.count})`).join(', ')}.`),
       );
     }
 
@@ -182,15 +185,14 @@ if (me && !me.isAdmin) {
       heading('h-upload', 'Upload the state’s sheet'),
       h(
         'div',
-        { class: 'panel field' },
+        { class: 'fl-card' },
         h(
           'p',
           {},
           'Export the LD8 tab as a CSV and choose it here. Nothing changes until you press Upload; this check only shows what would happen.',
         ),
-        h('label', { for: 'sheet' }, 'CSV file'),
-        file,
-        h('div', {}, h('button', { class: 'btn', type: 'button', onclick: check }, 'Check the file')),
+        field('sheet', 'CSV file', file),
+        h('button', { class: 'btn', type: 'button', onclick: check }, 'Check the file'),
         result,
       ),
     );
@@ -199,6 +201,7 @@ if (me && !me.isAdmin) {
   // ---- the grace period
   function settingsSection(settings: AdminSettings): void {
     const grace = h('input', {
+      class: 'fl-input',
       id: 'grace',
       type: 'number',
       min: '0',
@@ -214,7 +217,7 @@ if (me && !me.isAdmin) {
       h(
         'form',
         {
-          class: 'panel field',
+          class: 'fl-card',
           onsubmit: async (event) => {
             event.preventDefault();
             try {
@@ -225,14 +228,13 @@ if (me && !me.isAdmin) {
             }
           },
         },
-        h('label', { for: 'grace' }, 'Uploads a contacted person may stay on the list'),
-        h(
-          'p',
-          { class: 'muted' },
+        field(
+          'grace',
+          'Uploads a contacted person may stay on the list',
+          grace,
           'The state’s data runs behind the phone calls. After a volunteer marks someone contacted, this many uploads may still list them before it counts as an unsuccessful cure.',
         ),
-        grace,
-        h('div', {}, h('button', { class: 'btn', type: 'submit' }, 'Save')),
+        h('button', { class: 'btn', type: 'submit' }, 'Save'),
       ),
     );
   }
@@ -244,18 +246,16 @@ if (me && !me.isAdmin) {
     clear(
       sections.stats,
       heading('h-stats', 'Where things stand'),
-      h(
-        'ul',
-        { class: 'summary' },
-        h('li', {}, h('strong', {}, String(t.unassigned)), 'waiting for a volunteer'),
-        h('li', {}, h('strong', {}, String(t.needsContact)), 'to contact'),
-        h('li', {}, h('strong', {}, String(t.leftVoicemail)), 'left voicemail'),
-        h('li', {}, h('strong', {}, String(t.contacted)), 'contacted'),
-        h('li', {}, h('strong', {}, String(t.cured)), 'cured'),
+      tiles(
+        [t.unassigned, 'Waiting for a volunteer'],
+        [t.needsContact, 'To contact'],
+        [t.leftVoicemail, 'Left voicemail'],
+        [t.contacted, 'Contacted'],
+        [t.cured, 'Cured'],
       ),
       h(
         'p',
-        { class: 'muted' },
+        { class: 'fl-help' },
         last
           ? `Last upload: ${last.filename || `number ${last.id}`}, ${dateTime(last.createdAt)}, by ${last.uploadedBy}.`
           : 'Nothing has been uploaded yet.',
@@ -270,7 +270,7 @@ if (me && !me.isAdmin) {
       s.flagged.length === 0
         ? h(
             'p',
-            { class: 'muted' },
+            { class: 'fl-help' },
             'Nobody is flagged. People show up here as an unsuccessful cure (still on the state’s sheet after a volunteer marked them contacted) or when someone who was cured is listed again.',
           )
         : table(
@@ -281,11 +281,11 @@ if (me && !me.isAdmin) {
               move.setAttribute('aria-label', `Move ${personName(p)}`);
               move.addEventListener('change', () => assign(p, idOrNull(move)));
               return [
-                h('span', {}, personName(p), h('br', {}), h('span', { class: 'muted' }, `${p.phone || 'no phone'}, ${p.city}`)),
-                p.flag ? h('span', { class: 'flag' }, flagLabel(p.flag)) : '',
+                h('span', {}, personName(p), h('br', {}), h('span', { class: 'fl-help' }, `${p.phone || 'no phone'}, ${p.city}`)),
+                p.flag ? flagBadge(p.flag) : '',
                 p.assignedTo === null ? 'Nobody' : volunteerName(volunteers.get(p.assignedTo)),
                 move,
-                h('button', { class: 'btn btn--ghost btn--small', type: 'button', onclick: () => dismiss(p) }, 'Dismiss'),
+                h('button', { class: 'fl-btn fl-btn--sm', type: 'button', onclick: () => dismiss(p) }, 'Dismiss'),
               ];
             }),
           ),
@@ -297,15 +297,31 @@ if (me && !me.isAdmin) {
       sections.volunteers,
       heading('h-volunteers', 'Volunteers'),
       s.volunteers.length === 0
-        ? h('p', { class: 'muted' }, 'Nobody has signed in yet.')
+        ? h('p', { class: 'fl-help' }, 'Nobody has signed in yet.')
         : table(
             'Volunteers and their people',
             ['Volunteer', 'Open', 'To contact', 'Voicemail', 'Contacted', 'Cured', 'Flagged', 'Last seen', 'Move all open people to'],
             s.volunteers.map((v) => {
               const to = volunteerSelect(`move-${v.id}`, null, 'Back to the pool', v.id);
               to.setAttribute('aria-label', `Move everyone ${volunteerName(v)} has open`);
+              const move = h('button', { class: 'fl-btn fl-btn--sm', type: 'button', disabled: v.assigned === 0 }, 'Move');
+              // Moving a volunteer's whole list is one step too big to do on one click: Frostline asks first, in place.
+              window.Frostline.confirm(move, {
+                message: `Move ${plural(v.assigned, 'person', 'people')} from ${volunteerName(v)}?`,
+                confirmLabel: 'Move them',
+                cancelLabel: 'Keep them',
+                onConfirm: async () => {
+                  try {
+                    const r = await api<{ moved: number }>('POST', `/api/admin/volunteers/${v.id}/reassign`, { volunteerId: idOrNull(to) });
+                    toast(`Moved ${plural(r.moved, 'person', 'people')} from ${volunteerName(v)}.`);
+                    await refresh();
+                  } catch (e) {
+                    toast(failureText(e), 'error');
+                  }
+                },
+              });
               return [
-                h('span', {}, volunteerName(v), v.name ? h('span', { class: 'muted' }, ` ${v.email}`) : null),
+                h('span', {}, volunteerName(v), v.name ? h('span', { class: 'fl-help' }, ` ${v.email}`) : null),
                 String(v.assigned),
                 String(v.needsContact),
                 String(v.leftVoicemail),
@@ -313,31 +329,7 @@ if (me && !me.isAdmin) {
                 String(v.cured),
                 String(v.flagged),
                 dateTime(v.lastSeenAt),
-                h(
-                  'span',
-                  { class: 'row' },
-                  to,
-                  h(
-                    'button',
-                    {
-                      class: 'btn btn--ghost btn--small',
-                      type: 'button',
-                      disabled: v.assigned === 0,
-                      onclick: async () => {
-                        try {
-                          const r = await api<{ moved: number }>('POST', `/api/admin/volunteers/${v.id}/reassign`, {
-                            volunteerId: idOrNull(to),
-                          });
-                          toast(`Moved ${plural(r.moved, 'person', 'people')} from ${volunteerName(v)}.`);
-                          await refresh();
-                        } catch (e) {
-                          toast(failureText(e), 'error');
-                        }
-                      },
-                    },
-                    'Move',
-                  ),
-                ),
+                h('span', { class: 'fl-cluster' }, to, move),
               ];
             }),
             [1, 2, 3, 4, 5, 6],
@@ -367,12 +359,12 @@ if (me && !me.isAdmin) {
   // ---- find someone and move them
   let everyone: Person[] = [];
   function findSection(): void {
-    const q = h('input', { id: 'find', type: 'search', autocomplete: 'off', oninput: () => results() });
-    const out = h('div', {});
+    const q = h('input', { class: 'fl-input', id: 'find', type: 'search', autocomplete: 'off', oninput: () => results() });
+    const out = h('div', { class: 'fl-stack' });
     function results(): void {
       const needle = q.value.trim().toLowerCase();
       if (needle.length < 2) {
-        clear(out, h('p', { class: 'muted' }, 'Type at least two letters.'));
+        clear(out, h('p', { class: 'fl-help' }, 'Type at least two letters.'));
         return;
       }
       const found = everyone
@@ -381,7 +373,7 @@ if (me && !me.isAdmin) {
       clear(
         out,
         found.length === 0
-          ? h('p', { class: 'muted' }, 'Nobody matches.')
+          ? h('p', { class: 'fl-help' }, 'Nobody matches.')
           : table(
               'People found',
               ['Person', 'Status', 'Volunteer', 'Move to'],
@@ -391,7 +383,7 @@ if (me && !me.isAdmin) {
                 move.disabled = p.status === 'cured';
                 move.addEventListener('change', () => assign(p, idOrNull(move)));
                 return [
-                  h('span', {}, personName(p), h('br', {}), h('span', { class: 'muted' }, `${p.address}`)),
+                  h('span', {}, personName(p), h('br', {}), h('span', { class: 'fl-help' }, `${p.address}`)),
                   statusLabel(p.status),
                   p.assignedTo === null ? 'Nobody' : volunteerName(volunteers.get(p.assignedTo)),
                   move,
@@ -403,14 +395,14 @@ if (me && !me.isAdmin) {
     clear(
       sections.find,
       heading('h-find', 'Find someone and move them'),
-      h('div', { class: 'panel field' }, h('label', { for: 'find' }, 'Name, street or phone'), q, out),
+      h('div', { class: 'fl-card' }, field('find', 'Name, street or phone', q), out),
     );
     results();
   }
 
   // ---- audit log
   let log: AuditEntry[] = [];
-  const logBody = h('div', {});
+  const logBody = h('div', { class: 'fl-stack' });
   const describe = (e: AuditEntry): string => {
     const d = e.detail;
     const who = (v: unknown) => (typeof v === 'number' ? volunteerName(volunteers.get(v)) : 'the pool');
@@ -449,9 +441,7 @@ if (me && !me.isAdmin) {
           e.personName ? e.personName.toLowerCase().replace(/(^|\s)\S/g, (m) => m.toUpperCase()) : '',
         ]),
       ),
-      more
-        ? h('div', { class: 'row' }, h('button', { class: 'btn btn--ghost', type: 'button', onclick: loadMoreLog }, 'Show older'))
-        : null,
+      more ? h('div', { class: 'fl-cluster' }, h('button', { class: 'fl-btn', type: 'button', onclick: loadMoreLog }, 'Show older')) : null,
     );
   }
   async function loadMoreLog(): Promise<void> {
@@ -482,11 +472,10 @@ if (me && !me.isAdmin) {
   }
 
   try {
-    app.classList.remove('status-line');
     clear(app, ...Object.values(sections));
     uploadSection();
     await refresh();
   } catch (e) {
-    clear(app, h('p', { class: 'callout callout--warn', role: 'alert' }, failureText(e)));
+    clear(app, banner('warn', h('p', {}, failureText(e))));
   }
 }

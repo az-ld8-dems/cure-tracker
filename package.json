@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tools/build.sh",
     "dev": "node tools/dev.ts",
-    "typecheck": "wrangler types --config wrangler.jsonc --path worker/worker-configuration.d.ts && tsc -p worker && tsc -p src --noEmit && tsc -p tools",
+    "typecheck": "wrangler types --config wrangler.jsonc --path worker/worker-configuration.d.ts && tsc -p worker && tsc -p vendor/frostline --noEmit && tsc -p src --noEmit && tsc -p tools",
     "test": "npm run test:access && npm run test:import && npm run test:api && npm run test:lighthouse",
     "test:access": "node tools/test-access.ts",
     "test:import": "node tools/test-import.ts",

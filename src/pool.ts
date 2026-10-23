@@ -3,16 +3,18 @@ import type { Person, Volunteer } from './api.d.ts';
 import {
   $,
   api,
+  banner,
   boot,
   clear,
   facts,
   failureText,
-  flagLabel,
+  field,
+  flagBadge,
   h,
   loadVolunteers,
   personName,
   plural,
-  statusPill,
+  statusBadge,
   titleCase,
   toast,
 } from './common.ts';
@@ -30,21 +32,21 @@ if (me) {
   let volunteers = new Map<number, Volunteer>();
   let shown = PAGE;
 
-  const search = h('input', { id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
-  const city = h('select', { id: 'city', onchange: () => reset() });
-  const precinct = h('select', { id: 'precinct', onchange: () => reset() });
-  const party = h('select', { id: 'party', onchange: () => reset() });
+  const search = h('input', { class: 'fl-input', id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
+  const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reset() });
+  const precinct = h('select', { class: 'fl-select', id: 'precinct', onchange: () => reset() });
+  const party = h('select', { class: 'fl-select', id: 'party', onchange: () => reset() });
   const sort = h(
     'select',
-    { id: 'sort', onchange: () => reset() },
+    { class: 'fl-select', id: 'sort', onchange: () => reset() },
     h('option', { value: 'days' }, 'Longest uncured first'),
     h('option', { value: 'precinct' }, 'Precinct'),
     h('option', { value: 'city' }, 'City'),
     h('option', { value: 'name' }, 'Last name'),
   );
-  const count = h('p', { class: 'muted', role: 'status' });
-  const list = h('ul', { class: 'cards' });
-  const more = h('div', { class: 'row' });
+  const count = h('p', { class: 'fl-note', role: 'status' });
+  const list = h('ul', { class: 'fl-grid people' });
+  const more = h('div', { class: 'fl-cluster' });
 
   const pool = (): Person[] => people.filter((p) => p.assignedTo === null && p.status !== 'cured');
 
@@ -100,11 +102,11 @@ if (me) {
   function card(p: Person): HTMLElement {
     return h(
       'li',
-      { class: 'card' },
-      h('div', { class: 'card__head' }, h('h2', { class: 'card__title' }, personName(p)), statusPill(p.status)),
-      p.flag ? h('p', { class: 'flag', role: 'note' }, flagLabel(p.flag)) : null,
+      { class: 'fl-card' },
+      h('div', { class: 'fl-card__head' }, h('h2', { class: 'fl-card__title' }, personName(p)), statusBadge(p.status)),
+      p.flag ? flagBadge(p.flag) : null,
       facts(p, volunteers, false),
-      h('div', {}, h('button', { class: 'btn btn--accent', type: 'button', onclick: () => claim(p) }, `Claim ${personName(p)}`)),
+      h('button', { class: 'btn btn--accent', type: 'button', onclick: () => claim(p) }, `Claim ${personName(p)}`),
     );
   }
 
@@ -122,7 +124,7 @@ if (me) {
         ? 'Nobody is waiting for a volunteer right now.'
         : `Showing ${page.length} of ${plural(matches.length, 'person', 'people')}${matches.length === total ? '' : ` (${total} in all)`}.`;
     clear(list, ...page.map(card));
-    clear(more, matches.length > shown ? h('button', { class: 'btn btn--ghost', type: 'button', onclick: showMore }, 'Show more') : null);
+    clear(more, matches.length > shown ? h('button', { class: 'fl-btn', type: 'button', onclick: showMore }, 'Show more') : null);
   }
 
   try {
@@ -144,19 +146,16 @@ if (me) {
       open.map((p) => p.party),
       (v) => v,
     );
-    app.classList.remove('status-line');
-    const field = (label: string, id: string, control: HTMLElement) =>
-      h('div', { class: 'field' }, h('label', { for: id }, label), control);
     clear(
       app,
       h(
         'form',
-        { class: 'filters', role: 'search', onsubmit: (e) => e.preventDefault() },
-        field('Search name or street', 'search', search),
-        field('City', 'city', city),
-        field('Precinct', 'precinct', precinct),
-        field('Party', 'party', party),
-        field('Sort by', 'sort', sort),
+        { class: 'fl-toolbar', role: 'search', onsubmit: (e) => e.preventDefault() },
+        h('div', { class: 'fl-toolbar__wide' }, field('search', 'Search name or street', search)),
+        field('city', 'City', city),
+        field('precinct', 'Precinct', precinct),
+        field('party', 'Party', party),
+        field('sort', 'Sort by', sort),
       ),
       count,
       list,
@@ -164,6 +163,6 @@ if (me) {
     );
     render();
   } catch (e) {
-    clear(app, h('p', { class: 'callout callout--warn', role: 'alert' }, failureText(e)));
+    clear(app, banner('warn', h('p', {}, failureText(e))));
   }
 }
