@@ -32,6 +32,9 @@
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
     // Comma-separated emails that get the admin pages. Everyone else the Access policy lets in is a volunteer.
-    "ADMIN_EMAILS": ""
+    "ADMIN_EMAILS": "",
+    // "true" lets admins delete every voter from the admin page (for playing with test data). Set it to "false" and deploy before the real
+    // sheet goes in: the route then refuses and the button is gone. D1 Time Travel can undo a reset for 30 days either way (docs/setup.md).
+    "ALLOW_RESET": "true"
   }
 }

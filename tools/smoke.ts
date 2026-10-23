@@ -269,6 +269,24 @@ try {
   await darkAdminPage.goto(`${base}/admin/`);
   await darkAdminPage.getByRole('heading', { name: 'Audit log' }).waitFor();
   await check(darkAdminPage, 'admin (dark)');
+
+  // Start over: the dialog asks first, Keep them changes nothing, and the second time everything goes.
+  const peopleCount = () => Number(sqlite.prepare('SELECT COUNT(*) AS n FROM people').get()?.n);
+  const before = peopleCount();
+  expect('reset', before > 0, 'there are no voters to reset');
+  const dialog = darkAdminPage.getByRole('alertdialog');
+  await darkAdminPage.getByRole('button', { name: 'Delete all voters' }).click();
+  await dialog.waitFor();
+  await check(darkAdminPage, 'admin reset dialog (dark)');
+  await dialog.getByRole('button', { name: 'Keep them' }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  expect('reset', peopleCount() === before, 'Keep them deleted voters');
+  await darkAdminPage.getByRole('button', { name: 'Delete all voters' }).click();
+  await dialog.getByRole('button', { name: 'Delete all voters' }).click();
+  await darkAdminPage.getByText(/Deleted \d+ voters and \d+ notes?\./).waitFor();
+  expect('reset', peopleCount() === 0, 'the voters were not deleted');
+  await darkAdminPage.getByText('Nothing has been uploaded yet.').waitFor();
+  await check(darkAdminPage, 'admin after reset (dark)');
   await darkAdmin.close();
 
   // ---- a missing page is a 404 page with the site's chrome

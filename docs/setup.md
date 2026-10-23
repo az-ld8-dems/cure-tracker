@@ -41,7 +41,11 @@ Check it: open the site and sign in (you should see the welcome page asking for 
 
 `ci-proposed/release.yml` runs the full CI (WebKit, Chromium and Firefox) on a `v*` tag and then deploys. To use it: move `ci-proposed/ci.yml` and `release.yml` to `.github/workflows/`, create a `production` environment that allows tags `v*`, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to it as secrets (a token limited to Workers Scripts edit on this account), and tag a commit on `main` (`git tag v0.1.0 && git push origin v0.1.0`). Run `npm run db:migrate` by hand first when the release adds a migration. **Actions > release > Run workflow** runs the same checks on any branch without deploying.
 
-## 5. First upload
+## 5. Before the real data: turn the reset off
+
+`ALLOW_RESET` in `wrangler.jsonc` starts as `"true"`, so admins can use **Start over** to delete every voter while you play with test data. Before the real sheet goes in, set it to `"false"` and deploy (`npm run deploy`): the reset route then refuses and the button is gone. If a reset happens by mistake with it on, restore the database (see Backups).
+
+## 6. First upload
 
 Sign in as an admin, open **Admin**, choose the CSV of the LD8 sheet, press **Check the file**, read the counts, then **Upload this file**. See `docs/spec.md` for what the checks mean.
 

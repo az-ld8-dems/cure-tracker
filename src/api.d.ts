@@ -93,6 +93,8 @@ export interface UploadRecord {
 export interface AdminSettings {
   // How many uploads a person a volunteer marked contacted may stay on the list before it counts as an unsuccessful cure.
   graceCycles: number;
+  // Whether the reset (delete every voter) is turned on in this deployment.
+  resetEnabled: boolean;
 }
 
 export interface AdminStats {
@@ -137,6 +139,10 @@ export interface UploadPreview {
   possibleMatches: PossibleMatch[];
   possibleMatchCount: number;
   cities: { city: string; count: number }[];
+}
+
+export interface ResetResult {
+  deleted: { people: number; notes: number; uploads: number };
 }
 
 export interface ApiError {

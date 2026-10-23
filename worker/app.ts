@@ -9,6 +9,8 @@ import type { Db } from './db.ts';
 export interface AppEnv extends AccessEnv {
   // Comma-separated emails that get the admin pages.
   ADMIN_EMAILS: string;
+  // "true" lets admins reset (delete every voter). Anything else turns the reset off.
+  ALLOW_RESET: string;
   DB: Db;
   ASSETS: { fetch(request: Request): Promise<Response> };
 }
@@ -35,7 +37,7 @@ export async function handle(request: Request, env: AppEnv, deps: Deps = {}): Pr
   const path = new URL(request.url).pathname;
 
   if (path === '/api' || path.startsWith('/api/')) {
-    return handleApi(request, { db: env.DB, email, isAdmin, now: deps.now ?? (() => new Date()) });
+    return handleApi(request, { db: env.DB, email, isAdmin, allowReset: env.ALLOW_RESET === 'true', now: deps.now ?? (() => new Date()) });
   }
   if ((path === '/admin' || path.startsWith('/admin/')) && !isAdmin) return text(403, 'Forbidden');
   return env.ASSETS.fetch(request);

@@ -1,6 +1,6 @@
 // The admin page: upload the state's sheet, see how curing is going, answer the people the upload flagged, move people between
 // volunteers, and read the audit log.
-import type { AdminSettings, AdminStats, AuditEntry, Person, UploadPreview, UploadRecord, Volunteer } from './api.d.ts';
+import type { AdminSettings, AdminStats, AuditEntry, Person, ResetResult, UploadPreview, UploadRecord, Volunteer } from './api.d.ts';
 import {
   $,
   ApiFailure,
@@ -36,6 +36,7 @@ if (me && !me.isAdmin) {
     flagged: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-flagged' }),
     volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
     find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
+    reset: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-reset' }),
     audit: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-audit' }),
   };
 
@@ -400,6 +401,50 @@ if (me && !me.isAdmin) {
     results();
   }
 
+  // ---- start over (only where the deployment turns it on)
+  function resetSection(settings: AdminSettings): void {
+    sections.reset.hidden = !settings.resetEnabled;
+    if (!settings.resetEnabled) {
+      clear(sections.reset);
+      return;
+    }
+    const button = h('button', { class: 'fl-btn fl-btn--danger', type: 'button' }, 'Delete all voters');
+    // Deleting everything gets a dialog of its own, with the way back named in it.
+    window.Frostline.confirm(button, {
+      modal: true,
+      title: 'Delete all voters?',
+      message:
+        'Every voter, every note and the upload history will be deleted. Volunteers, the grace period setting and the audit log stay.',
+      detail:
+        'This cannot be undone from here. A site admin can restore the database to an earlier minute (D1 Time Travel, docs/setup.md).',
+      confirmLabel: 'Delete all voters',
+      cancelLabel: 'Keep them',
+      onConfirm: async () => {
+        try {
+          const done = await api<ResetResult>('POST', '/api/admin/reset', { confirm: 'delete all voters' });
+          toast(`Deleted ${plural(done.deleted.people, 'voter')} and ${plural(done.deleted.notes, 'note')}.`);
+          await refresh();
+        } catch (e) {
+          toast(failureText(e), 'error');
+        }
+      },
+    });
+    clear(
+      sections.reset,
+      heading('h-reset', 'Start over'),
+      h(
+        'div',
+        { class: 'fl-card' },
+        h(
+          'p',
+          {},
+          'Delete every voter, note and upload, for starting over after trying the tool with test data. Turn this off before the real sheet goes in.',
+        ),
+        button,
+      ),
+    );
+  }
+
   // ---- audit log
   let log: AuditEntry[] = [];
   const logBody = h('div', { class: 'fl-stack' });
@@ -422,6 +467,8 @@ if (me && !me.isAdmin) {
         const to = typeof change === 'object' && change !== null && 'to' in change ? String(change.to) : '?';
         return `set the grace to ${to} uploads`;
       }
+      case 'reset':
+        return `deleted all voters (${String(d.people)} people, ${String(d.notes)} notes, ${String(d.uploads)} uploads)`;
       case 'volunteer.rename':
         return `now called ${String(d.to)}`;
       default:
@@ -467,6 +514,7 @@ if (me && !me.isAdmin) {
     flaggedSection(stats);
     volunteersSection(stats);
     findSection();
+    resetSection(settings);
     clear(sections.audit, heading('h-audit', 'Audit log'), logBody);
     renderLog(firstPage.length === 50);
   }

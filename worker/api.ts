@@ -11,6 +11,7 @@ import type {
   Note,
   Person,
   PersonDetail,
+  ResetResult,
   Status,
   Volunteer,
   VolunteerStats,
@@ -23,6 +24,8 @@ export interface ApiContext {
   db: Db;
   email: string;
   isAdmin: boolean;
+  // Whether this deployment lets admins reset (ALLOW_RESET).
+  allowReset: boolean;
   now: () => Date;
 }
 
@@ -30,6 +33,7 @@ interface Ctx {
   db: Db;
   me: Volunteer;
   isAdmin: boolean;
+  allowReset: boolean;
   now: string;
   today: string;
 }
@@ -480,7 +484,7 @@ async function reassignAll(c: Ctx, p: string[], body: Body): Promise<Response> {
 }
 
 async function getSettings(c: Ctx): Promise<Response> {
-  const settings: AdminSettings = { graceCycles: await graceCycles(c.db) };
+  const settings: AdminSettings = { graceCycles: await graceCycles(c.db), resetEnabled: c.allowReset };
   return json(settings);
 }
 
@@ -496,8 +500,28 @@ async function putSettings(c: Ctx, _p: string[], body: Body): Promise<Response> 
       .bind(String(raw)),
     auditStmt(c, 'settings', null, { graceCycles: { from: before, to: raw } }),
   ]);
-  const settings: AdminSettings = { graceCycles: raw };
+  const settings: AdminSettings = { graceCycles: raw, resetEnabled: c.allowReset };
   return json(settings);
+}
+
+// Deletes every voter, their notes and the upload history, for starting over after trying the tool with test data. Volunteers, the
+// settings and the audit log stay (the log gets a row saying what was deleted). Refused unless this deployment turns it on, and unless
+// the request says what it is.
+async function reset(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  if (!c.allowReset) throw new HttpError(403, 'Reset is turned off on this site');
+  if (body.confirm !== 'delete all voters') throw new HttpError(400, 'Send confirm: "delete all voters"');
+  const count = async (table: string): Promise<number> =>
+    (await c.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())?.n ?? 0;
+  const deleted = { people: await count('people'), notes: await count('notes'), uploads: await count('uploads') };
+  // Notes and people point at people and uploads, so they go first.
+  await c.db.batch([
+    c.db.prepare('DELETE FROM notes'),
+    c.db.prepare('DELETE FROM people'),
+    c.db.prepare('DELETE FROM uploads'),
+    auditStmt(c, 'reset', null, deleted),
+  ]);
+  const result: ResetResult = { deleted };
+  return json(result);
 }
 
 interface Route {
@@ -522,6 +546,7 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/uploads$/, admin: true, handler: adminUploads },
   { method: 'GET', pattern: /^\/api\/admin\/settings$/, admin: true, handler: getSettings },
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, admin: true, handler: putSettings },
+  { method: 'POST', pattern: /^\/api\/admin\/reset$/, admin: true, handler: reset },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/preview$/, admin: true, handler: uploadPreview },
   { method: 'POST', pattern: /^\/api\/admin\/uploads$/, admin: true, handler: uploadApply },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, admin: true, handler: assign },
@@ -574,7 +599,7 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
     const now = api.now();
     const iso = now.toISOString();
     const me = await ensureVolunteer(api.db, api.email, iso);
-    const ctx: Ctx = { db: api.db, me, isAdmin: api.isAdmin, now: iso, today: arizonaDate(now) };
+    const ctx: Ctx = { db: api.db, me, isAdmin: api.isAdmin, allowReset: api.allowReset, now: iso, today: arizonaDate(now) };
     const m = route.pattern.exec(url.pathname);
     return await route.handler(ctx, m?.slice(1) ?? [], body, url);
   } catch (e) {

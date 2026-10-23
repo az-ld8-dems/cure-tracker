@@ -43,6 +43,10 @@ Safeguards:
 - A file that would cure more than half of at least ten open people is probably a partial export. The upload is refused unless the admin ticks "Upload it anyway".
 - A new person who looks like someone who just disappeared (same last name and address with another first name, or the same name at another address) is listed as a **possible match**. Nothing is merged; the old record is cured and the new one added. An admin can reassign by hand.
 
+## Start over
+
+While trying the tool with test data, an admin can use **Start over** (bottom of the admin page) to delete every voter, every note and the upload history. A dialog asks first. Volunteers, the grace period setting and the audit log stay, and the log gets a row saying how much was deleted. It exists only where the deployment turns it on: `ALLOW_RESET` in `wrangler.jsonc` is `"true"`; set it to `"false"` and deploy before the real sheet goes in, and the route refuses and the section disappears. The API also requires the body `{ "confirm": "delete all voters" }`, so a stray request cannot do it.
+
 ## Audit log
 
 Every change writes a row: who, when, what, which person. Joining, renaming, claims, releases, status changes, notes, assignments, reassignments, flag dismissals, uploads and what each upload cured, flagged or reopened. Admins read it newest first on the admin page.

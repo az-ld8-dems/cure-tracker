@@ -81,7 +81,14 @@ export async function startDevServer({
         up.end();
       }),
   };
-  const env: AppEnv = { ACCESS_TEAM_DOMAIN: 'dev.example', ACCESS_AUD: 'dev', ADMIN_EMAILS: DEV_ADMIN, DB: db, ASSETS };
+  const env: AppEnv = {
+    ACCESS_TEAM_DOMAIN: 'dev.example',
+    ACCESS_AUD: 'dev',
+    ADMIN_EMAILS: DEV_ADMIN,
+    ALLOW_RESET: 'true',
+    DB: db,
+    ASSETS,
+  };
 
   const server = createServer(async (req, res) => {
     try {

@@ -1,7 +1,17 @@
 // Checks the Worker's request handling (worker/app.ts, api.ts, uploads.ts) on a SQLite database with the real migration: who may do
 // what, claims that cannot collide, the upload lifecycle (cured, still uncured, reappeared), the admin tools and the audit log.
 import assert from 'node:assert/strict';
-import type { AdminStats, AuditEntry, Me, Person, PersonDetail, UploadPreview, Volunteer } from '../src/api.d.ts';
+import type {
+  AdminSettings,
+  AdminStats,
+  AuditEntry,
+  Me,
+  Person,
+  PersonDetail,
+  ResetResult,
+  UploadPreview,
+  Volunteer,
+} from '../src/api.d.ts';
 import type { AccessVerifier } from '../worker/access.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { type SheetPerson, sheetCsv, syntheticPeople } from './lib/sheet.ts';
@@ -13,11 +23,13 @@ console.warn = (...a: unknown[]) => logged.push(a.join(' '));
 console.error = (...a: unknown[]) => logged.push(a.join(' '));
 
 const sqlite = migratedDb();
+const count = (table: string): number => Number(sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n);
 const assetCalls: string[] = [];
 const env: AppEnv = {
   ACCESS_TEAM_DOMAIN: 'test.example',
   ACCESS_AUD: 'test',
   ADMIN_EMAILS: 'Admin@Example.com, second@example.com',
+  ALLOW_RESET: 'true',
   DB: sqliteD1(sqlite),
   ASSETS: {
     fetch: async (req) => {
@@ -298,7 +310,6 @@ assert.deepEqual(
 );
 
 // --- a failed upload leaves nothing behind: make the last statement of the batch fail, and check that none of the others stuck
-const count = (table: string) => Number(sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n);
 const [peopleBefore, uploadsBefore, auditBefore] = [count('people'), count('uploads'), count('audit')];
 sqlite.exec("CREATE TRIGGER fail_upload BEFORE INSERT ON audit WHEN NEW.action = 'upload' BEGIN SELECT RAISE(ABORT, 'boom'); END");
 const failed = await call(admin, 'POST', '/api/admin/uploads', {
@@ -315,7 +326,11 @@ assert.deepEqual([count('people'), count('uploads'), count('audit')], [peopleBef
 // --- the grace period: how many uploads a person marked contacted may stay on the list before it is an unsuccessful cure
 assert.equal((await call(vera, 'PUT', '/api/admin/settings', { graceCycles: 0 })).status, 403, 'only admins change it');
 assert.equal((await call(vera, 'GET', '/api/admin/settings')).status, 403);
-assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 1 }, 'one cycle of grace until an admin says otherwise');
+assert.deepEqual(
+  await ok(admin, 'GET', '/api/admin/settings'),
+  { graceCycles: 1, resetEnabled: true },
+  'one cycle of grace until an admin says otherwise',
+);
 for (const bad of [-1, 31, 1.5, null, '2']) {
   assert.equal((await call(admin, 'PUT', '/api/admin/settings', { graceCycles: bad })).status, 400, `graceCycles ${bad}`);
 }
@@ -329,8 +344,8 @@ advance(24);
 const withGrace = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(day4) });
 assert.equal(withGrace.stillUncured, 0, 'the first upload after the call is within a grace of one');
 
-assert.deepEqual(await ok(admin, 'PUT', '/api/admin/settings', { graceCycles: 0 }), { graceCycles: 0 });
-assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 0 });
+assert.deepEqual(await ok(admin, 'PUT', '/api/admin/settings', { graceCycles: 0 }), { graceCycles: 0, resetEnabled: true });
+assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 0, resetEnabled: true });
 const noGrace = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(day4) });
 assert.equal(noGrace.stillUncured, 1, 'with no grace it is an unsuccessful cure at once');
 await ok(admin, 'POST', '/api/admin/uploads', { csv: csv(day4) });
@@ -338,5 +353,31 @@ const unsuccessful = (await ok<Person[]>(vera, 'GET', '/api/people')).find((p) =
 assert.deepEqual([unsuccessful.status, unsuccessful.flag, unsuccessful.assignedTo], ['needs_contact', 'still_uncured', vid(vera)]);
 const settingsLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=200')).find((e) => e.action === 'settings');
 assert.deepEqual(settingsLog?.detail, { graceCycles: { from: 1, to: 0 } });
+
+// --- reset: delete every voter, to start over after trying the tool with test data
+const confirmReset = { confirm: 'delete all voters' };
+assert.equal((await call(vera, 'POST', '/api/admin/reset', confirmReset)).status, 403, 'only admins');
+assert.equal((await call(admin, 'POST', '/api/admin/reset', {})).status, 400, 'the request has to say what it is');
+assert.equal((await call(admin, 'POST', '/api/admin/reset', { confirm: 'yes' })).status, 400);
+env.ALLOW_RESET = 'false';
+assert.equal((await call(admin, 'POST', '/api/admin/reset', confirmReset)).status, 403, 'a deployment can turn it off');
+assert.equal((await ok<AdminSettings>(admin, 'GET', '/api/admin/settings')).resetEnabled, false);
+env.ALLOW_RESET = 'true';
+assert.equal((await ok<AdminSettings>(admin, 'GET', '/api/admin/settings')).resetEnabled, true);
+const [peopleN, notesN, uploadsN] = [count('people'), count('notes'), count('uploads')];
+assert.ok(peopleN > 0 && notesN > 0 && uploadsN > 0, 'there is something to delete');
+const volunteersBefore = count('volunteers');
+const wiped = await ok<ResetResult>(admin, 'POST', '/api/admin/reset', confirmReset);
+assert.deepEqual(wiped.deleted, { people: peopleN, notes: notesN, uploads: uploadsN });
+assert.deepEqual([count('people'), count('notes'), count('uploads')], [0, 0, 0]);
+assert.equal(count('volunteers'), volunteersBefore, 'volunteers stay');
+assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 0, resetEnabled: true }, 'so do the settings');
+assert.deepEqual(await ok<Person[]>(vera, 'GET', '/api/people'), []);
+const afterReset = await ok<AdminStats>(admin, 'GET', '/api/admin/stats');
+assert.deepEqual([afterReset.totals.unassigned, afterReset.totals.cured, afterReset.lastUpload], [0, 0, null]);
+const resetLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=5'))[0];
+assert.deepEqual([resetLog?.action, resetLog?.actor, resetLog?.detail], ['reset', admin, wiped.deleted], 'the log keeps what happened');
+const fresh2 = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(base) });
+assert.deepEqual([fresh2.id, fresh2.added], [1, 30], 'a new upload starts over');
 
 console.log('test-api: ok');
