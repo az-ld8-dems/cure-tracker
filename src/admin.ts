@@ -1,9 +1,12 @@
 // The admin page: upload the state's sheet, see how curing is going, answer the people the upload flagged, move people between
 // volunteers, and read the audit log.
+
 import type { AdminSettings, AdminStats, AuditEntry, Person, ResetResult, UploadPreview, UploadRecord, Volunteer } from './api.d.ts';
+import { describeAudit } from './audit-text.ts';
 import {
   $,
   ApiFailure,
+  addressText,
   api,
   banner,
   boot,
@@ -384,7 +387,7 @@ if (me && !me.isAdmin) {
                 move.disabled = p.status === 'cured';
                 move.addEventListener('change', () => assign(p, idOrNull(move)));
                 return [
-                  h('span', {}, personName(p), h('br', {}), h('span', { class: 'fl-help' }, `${p.address}`)),
+                  h('span', {}, personName(p), h('br', {}), h('span', { class: 'fl-help' }, addressText(p.address))),
                   statusLabel(p.status),
                   p.assignedTo === null ? 'Nobody' : volunteerName(volunteers.get(p.assignedTo)),
                   move,
@@ -448,33 +451,7 @@ if (me && !me.isAdmin) {
   // ---- audit log
   let log: AuditEntry[] = [];
   const logBody = h('div', { class: 'fl-stack' });
-  const describe = (e: AuditEntry): string => {
-    const d = e.detail;
-    const who = (v: unknown) => (typeof v === 'number' ? volunteerName(volunteers.get(v)) : 'the pool');
-    switch (e.action) {
-      case 'status':
-        return `marked ${String(d.to)} (was ${String(d.from)})`;
-      case 'assign':
-        return `moved from ${who(d.from)} to ${who(d.to)}`;
-      case 'reassign':
-        return `moved ${String(d.count)} from ${who(d.from)} to ${who(d.to)}`;
-      case 'release':
-        return `released by ${who(d.from)}`;
-      case 'upload':
-        return `uploaded ${String(d.filename)}: ${String(d.added)} added, ${String(d.cured)} cured, ${String(d.stillUncured)} still uncured, ${String(d.reappeared)} back`;
-      case 'settings': {
-        const change = d.graceCycles;
-        const to = typeof change === 'object' && change !== null && 'to' in change ? String(change.to) : '?';
-        return `set the grace to ${to} uploads`;
-      }
-      case 'reset':
-        return `deleted all voters (${String(d.people)} people, ${String(d.notes)} notes, ${String(d.uploads)} uploads)`;
-      case 'volunteer.rename':
-        return `now called ${String(d.to)}`;
-      default:
-        return e.action.replace('.', ' ');
-    }
-  };
+  const describe = (e: AuditEntry): string => describeAudit(e, (id) => (id === null ? 'the pool' : volunteerName(volunteers.get(id))));
   function renderLog(more: boolean): void {
     clear(
       logBody,

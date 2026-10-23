@@ -10,7 +10,7 @@
     "build": "tools/build.sh",
     "dev": "node tools/dev.ts",
     "typecheck": "wrangler types --config wrangler.jsonc --path worker/worker-configuration.d.ts && tsc -p worker && tsc -p vendor/frostline --noEmit && tsc -p src --noEmit && tsc -p tools",
-    "test": "npm run test:access && npm run test:import && npm run test:api && npm run test:lighthouse",
+    "test": "npm run test:access && npm run test:import && npm run test:format && npm run test:api && npm run test:lighthouse",
     "test:access": "node tools/test-access.ts",
     "test:import": "node tools/test-import.ts",
     "test:api": "node tools/test-api.ts",
@@ -23,7 +23,8 @@
     "fix": "biome check --write",
     "deploy": "tools/build.sh && wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply cure-tracker --remote",
-    "db:migrate:local": "wrangler d1 migrations apply cure-tracker --local"
+    "db:migrate:local": "wrangler d1 migrations apply cure-tracker --local",
+    "test:format": "node tools/test-format.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

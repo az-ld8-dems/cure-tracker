@@ -70,6 +70,10 @@ export const failureText = (e: unknown): string => (e instanceof Error ? e.messa
 export const titleCase = (s: string): string =>
   s.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_m, sep: string, c: string) => sep + c.toUpperCase());
 
+// A street address as the state writes it (3302 N 47TH PL PHOENIX, AZ 85018), in sentence-style capitals but with the directions, PO and
+// the state kept as capitals (Ne and Nw would be wrong). Precincts are shown exactly as written: nothing here can tell ASU from a word.
+export const addressText = (s: string): string => titleCase(s).replace(/\b(Ne|Nw|Se|Sw|Po|Az|Us)\b/g, (m) => m.toUpperCase());
+
 export const personName = (p: Pick<Person, 'firstName' | 'lastName'>): string => titleCase(`${p.firstName} ${p.lastName}`);
 
 export const phoneHref = (phone: string): string => `tel:${phone.replace(/[^\d+]/g, '')}`;
@@ -166,8 +170,8 @@ export function facts(p: Person, volunteers: Map<number, Volunteer>, withVolunte
   const rows: [string, Node | string][] = [];
   if (p.phone) rows.push(['Phone', h('a', { href: phoneHref(p.phone) }, p.phone)]);
   else rows.push(['Phone', 'None on file']);
-  rows.push(['Address', titleCase(p.address).replace(/,\s*Az\b/, ', AZ')]);
-  rows.push(['Precinct', p.precinct ? titleCase(p.precinct) : 'Unknown']);
+  rows.push(['Address', addressText(p.address)]);
+  rows.push(['Precinct', p.precinct || 'Unknown']);
   rows.push(['Party', p.party || 'Unknown']);
   rows.push(['Uncured for', daysText(p)]);
   if (p.reasonCode) rows.push(['Reason', titleCase(p.reasonCode)]);

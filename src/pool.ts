@@ -139,6 +139,7 @@ if (me) {
       precinct,
       'All precincts',
       open.map((p) => p.precinct),
+      (v) => v,
     );
     fill(
       party,
@@ -151,7 +152,7 @@ if (me) {
       h(
         'form',
         { class: 'fl-toolbar', role: 'search', onsubmit: (e) => e.preventDefault() },
-        h('div', { class: 'fl-toolbar__wide' }, field('search', 'Search name or street', search)),
+        field('search', 'Search name or street', search),
         field('city', 'City', city),
         field('precinct', 'Precinct', precinct),
         field('party', 'Party', party),
