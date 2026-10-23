@@ -1,0 +1,253 @@
+/* The cure tracker's own styles: the LD8 pieces the design doc defines (page ground, header, kicker, headings, buttons) and the few
+   app-specific rules. Everything else is Frostline's components (vendor/frostline, loaded before this file inside @layer frostline,
+   so a plain rule here wins). Tokens are in tokens.css; docs/design.md has the rules.
+
+   Spacing (Frostline's rules; the LD8 doc only gives the scale): space comes from `gap` on a container, never from margins on its
+   children, so headings, paragraphs and lists here have no margins. fl-stack is the column (space-4; --3, --6, --8 for the other roles):
+   space-3 between blocks in a card, a heading and its content, and list items; space-4 for card padding and form gaps; space-6
+   between cards and tiles; space-8 between page sections. Only these steps; never an in-between value. */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--space-3xl) + env(safe-area-inset-top, 0px));
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 16px / 26px var(--font-sans);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+a {
+  color: var(--brand);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: 48px;
+  line-height: 50px;
+}
+
+h2 {
+  font-size: 36px;
+  line-height: 40px;
+}
+
+h3 {
+  font-size: 26px;
+  line-height: 30px;
+}
+
+/* The LD8 card title is Barlow 26/30 (h3 in the design doc); Frostline's card is the container. */
+.fl-card .fl-card__title {
+  font: 700 26px / 30px var(--font-display);
+}
+
+/* Header: the LD8 header, a hard 2px line below it */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  box-shadow: var(--shadow-header);
+}
+
+.site-header__in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs) var(--space-lg);
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: max(var(--space-sm), env(safe-area-inset-top, 0px)) max(var(--space-md), env(safe-area-inset-right, 0px)) var(--space-sm)
+    max(var(--space-md), env(safe-area-inset-left, 0px));
+}
+
+.site-header__brand img {
+  display: block;
+  width: min(60vw, 220px);
+  height: auto;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav a {
+  display: inline-block;
+  padding: var(--space-xs) var(--space-3xs);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
+}
+
+.nav a:hover {
+  border-bottom-color: var(--sun);
+}
+
+.nav a[aria-current="page"] {
+  border-bottom-color: var(--brand);
+  color: var(--brand);
+}
+
+.who {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* Page: Frostline's frame (fl-page), with room below for a phone's home indicator */
+.page {
+  padding-block: var(--space-6) var(--space-3xl);
+}
+
+.kicker {
+  display: inline-block;
+  align-self: start;
+  font: 700 13px / 16px var(--font-sans);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-bottom: var(--space-2xs);
+  border-bottom: 3px solid var(--sun);
+}
+
+.lead {
+  max-width: 68ch;
+  font-size: 20px;
+  line-height: 30px;
+  color: var(--muted);
+}
+
+/* Buttons: the LD8 button. The small and ghost-in-a-row buttons are Frostline's (fl-btn fl-btn--sm). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  min-height: 44px;
+  padding: var(--space-xs) var(--space-lg);
+  border: 2px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--brand);
+  color: var(--on-brand);
+  font: 600 16px / 20px var(--font-sans);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+
+.btn--accent {
+  background: var(--ld8-accent);
+  border-color: var(--ld8-accent);
+  color: var(--ld8-on-accent);
+}
+
+.btn--accent:hover {
+  background: var(--ld8-accent-strong);
+  border-color: var(--ld8-accent-strong);
+}
+
+.btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* People: a grid of Frostline cards, wide enough for the status buttons */
+.people,
+.tiles {
+  margin: 0;
+  padding: 0;
+  list-style-type: "\200B"; /* an invisible marker keeps the list a list for VoiceOver (see Frostline's fl-list) */
+}
+
+.people {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+}
+
+.tiles {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--space-3);
+}
+
+/* Frostline sizes its own buttons to their content inside a card; the LD8 button should too */
+.fl-card > .btn {
+  justify-self: start;
+}
+
+/* The three status buttons share the card's width, and their words wrap inside them */
+.status-seg {
+  display: flex;
+}
+
+.status-seg button {
+  flex: 1 1 0;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-3xs) var(--space-md);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.notes {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notes small {
+  display: block;
+  color: var(--muted);
+}
+
+/* Last, so that it beats the display rules above and in Frostline. */
+[hidden] {
+  display: none;
+}

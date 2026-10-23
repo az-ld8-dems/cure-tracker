@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Page not found</title>
+    <meta name="description" content="There is nothing at this address.">
+    <meta name="theme-color" content="#1f497d">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/tokens.css">
+    <link rel="stylesheet" href="/frostline/1.11/components/bundle.css">
+    <link rel="stylesheet" href="/app.css">
+    <link rel="preload" href="/fonts/PublicSans-Variable-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <script src="/frostline/1.11/components/bundle.js" defer></script>
+  </head>
+  <body>
+    <a class="fl-skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-header__in">
+        <a class="site-header__brand" href="/">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="/img/ld8-dems-logo-dark.webp">
+            <img src="/img/ld8-dems-logo.webp" alt="Arizona LD8 Democrats" width="602" height="151">
+          </picture>
+        </a>
+        <nav aria-label="Primary">
+          <ul class="nav">
+            <li><a href="/">My people</a></li>
+            <li><a href="/pool/">Find people</a></li>
+            <li id="nav-admin" hidden><a href="/admin/">Admin</a></li>
+            <li><span class="who" id="who"></span></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <main id="main" class="fl-page page fl-stack fl-stack--8">
+      <div class="fl-stack fl-stack--3">
+        <p class="kicker">Not found</p>
+        <h1>Page not found</h1>
+        <p class="lead">There is nothing at this address. <a href="/">Go to your people</a>.</p>
+      </div>
+    </main>
+    <script type="module" src="/js/chrome.js"></script>
+  </body>
+</html>
