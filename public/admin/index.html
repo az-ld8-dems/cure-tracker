@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Admin</title>
+    <meta name="description" content="Upload the state’s sheet, see how curing is going and move people between volunteers.">
+    <meta name="theme-color" content="#1f497d">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/app.css">
+    <link rel="preload" href="/fonts/PublicSans-Variable-latin.woff2" as="font" type="font/woff2" crossorigin>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-header__in">
+        <a class="site-header__brand" href="/">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="/img/ld8-dems-logo-dark.webp">
+            <img src="/img/ld8-dems-logo.webp" alt="Arizona LD8 Democrats" width="602" height="151">
+          </picture>
+        </a>
+        <nav aria-label="Primary">
+          <ul class="nav">
+            <li><a href="/">My people</a></li>
+            <li><a href="/pool/">Find people</a></li>
+            <li id="nav-admin" hidden><a href="/admin/" aria-current="page">Admin</a></li>
+            <li><span class="who" id="who"></span></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+    <main id="main">
+      <p class="kicker">Admin</p>
+      <h1>How curing is going</h1>
+      <p class="lead">Upload the new sheet when it arrives, check on volunteers, and move people around.</p>
+      <div id="app" class="status-line">Loading…</div>
+    </main>
+    <script type="module" src="/js/admin.js"></script>
+  </body>
+</html>
