@@ -37,7 +37,11 @@ npm run deploy
 
 Check it: open the site and sign in (you should see the welcome page asking for your name), then `/admin/` as an admin. A request that skips Access (the `workers.dev` hostname is off, `workers_dev: false`) gets the Worker's own 403.
 
-## 4. First upload
+## 4. Releases (optional)
+
+`ci-proposed/release.yml` runs the full CI (WebKit, Chromium and Firefox) on a `v*` tag and then deploys. To use it: move `ci-proposed/ci.yml` and `release.yml` to `.github/workflows/`, create a `production` environment that allows tags `v*`, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to it as secrets (a token limited to Workers Scripts edit on this account), and tag a commit on `main` (`git tag v0.1.0 && git push origin v0.1.0`). Run `npm run db:migrate` by hand first when the release adds a migration. **Actions > release > Run workflow** runs the same checks on any branch without deploying.
+
+## 5. First upload
 
 Sign in as an admin, open **Admin**, choose the CSV of the LD8 sheet, press **Check the file**, read the counts, then **Upload this file**. See `docs/spec.md` for what the checks mean.
 

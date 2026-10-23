@@ -112,10 +112,21 @@ const known = (
   over: Partial<ExistingPerson> = {},
 ): ExistingPerson => {
   const p = incoming(first);
-  return { id, key: p.key, firstName: first, lastName: 'Roe', address: p.address, status, statusChangedAt: changedAt, flag: null, ...over };
+  return {
+    id,
+    key: p.key,
+    firstName: first,
+    lastName: 'Roe',
+    address: p.address,
+    status,
+    statusChangedAt: changedAt,
+    flag: null,
+    contactedCycles: 0,
+    ...over,
+  };
 };
 const NOW = '2026-10-23T12:00:00.000Z';
-const PREVIOUS = '2026-10-22T12:00:00.000Z';
+const GRACE = 1;
 
 {
   const existing = [
@@ -123,14 +134,14 @@ const PREVIOUS = '2026-10-22T12:00:00.000Z';
     known(2, 'Gone', 'left_voicemail', '2026-10-01T00:00:00.000Z'),
     known(3, 'Done', 'cured', '2026-10-02T00:00:00.000Z'),
     known(4, 'Back', 'cured', '2026-10-02T00:00:00.000Z'),
-    known(5, 'Retry', 'contacted', '2026-10-21T00:00:00.000Z'),
-    known(6, 'Recent', 'contacted', '2026-10-22T18:00:00.000Z'),
+    known(5, 'Retry', 'contacted', '2026-10-21T00:00:00.000Z', { contactedCycles: 1 }),
+    known(6, 'Recent', 'contacted', '2026-10-22T18:00:00.000Z', { contactedCycles: 0 }),
   ];
   const plan = planUpload(
     [incoming('Stays'), incoming('Back'), incoming('Retry'), incoming('Recent'), incoming('Fresh')],
     existing,
     NOW,
-    PREVIOUS,
+    GRACE,
   );
   assert.deepEqual(
     plan.inserts.map((p) => p.firstName),
@@ -141,8 +152,12 @@ const PREVIOUS = '2026-10-22T12:00:00.000Z';
   assert.equal(by(1)?.status, 'needs_contact');
   assert.equal(by(1)?.flag, null);
   assert.deepEqual([by(4)?.status, by(4)?.flag], ['needs_contact', 'reappeared'], 'a cured person who is back is reopened and flagged');
-  assert.deepEqual([by(5)?.status, by(5)?.flag], ['needs_contact', 'still_uncured'], 'contacted before the last upload and still listed');
-  assert.deepEqual([by(6)?.status, by(6)?.flag], ['contacted', null], 'contacted since the last upload: give the state a day');
+  assert.deepEqual(
+    [by(5)?.status, by(5)?.flag, by(5)?.contactedCycles],
+    ['needs_contact', 'still_uncured', 0],
+    'a second cycle past a grace of 1',
+  );
+  assert.deepEqual([by(6)?.status, by(6)?.flag, by(6)?.contactedCycles], ['contacted', null, 1], 'the first cycle is within the grace');
   assert.equal(plan.stillUncured, 1);
   assert.equal(plan.reappeared, 1);
   assert.equal(plan.openBefore, 4);
@@ -150,22 +165,34 @@ const PREVIOUS = '2026-10-22T12:00:00.000Z';
   assert.deepEqual(plan.audit.map((a) => a.action).sort(), ['import.reappeared', 'import.still_uncured']);
 }
 
-// The first upload ever flags nobody, and a contacted person stays contacted when there is no earlier upload to compare with.
+// The grace period is how many uploads a contacted person may stay on the list before it is an unsuccessful cure.
 {
-  const plan = planUpload([incoming('A')], [known(1, 'A', 'contacted', '2026-10-01T00:00:00.000Z')], NOW, null);
-  assert.equal(plan.stillUncured, 0);
+  const old = '2026-10-01T00:00:00.000Z';
+  const run = (grace: number, contactedCycles: number) =>
+    planUpload([incoming('A')], [known(1, 'A', 'contacted', old, { contactedCycles })], NOW, grace).updates[0] ?? assert.fail('no update');
+  assert.deepEqual(
+    [run(0, 0).status, run(0, 0).flag],
+    ['needs_contact', 'still_uncured'],
+    'no grace: the first upload that still lists them',
+  );
+  assert.deepEqual([run(2, 0).status, run(2, 0).contactedCycles], ['contacted', 1]);
+  assert.deepEqual([run(2, 1).status, run(2, 1).contactedCycles], ['contacted', 2]);
+  assert.deepEqual([run(2, 2).status, run(2, 2).flag], ['needs_contact', 'still_uncured'], 'a third upload past a grace of 2');
+  // Only people marked contacted count: someone nobody has reached just stays on the list as long as they are listed.
+  const waiting = planUpload([incoming('A')], [known(1, 'A', 'left_voicemail', old, { contactedCycles: 5 })], NOW, 0).updates[0];
+  assert.deepEqual([waiting?.status, waiting?.flag, waiting?.contactedCycles], ['left_voicemail', null, 0]);
 }
 
 // A file that would cure most of the open people looks partial.
 {
   const existing = Array.from({ length: 12 }, (_, i) => known(i + 1, `P${i}`, 'needs_contact', '2026-10-01T00:00:00.000Z'));
-  assert.equal(planUpload([incoming('P0')], existing, NOW, PREVIOUS).looksPartial, true);
+  assert.equal(planUpload([incoming('P0')], existing, NOW, GRACE).looksPartial, true);
   assert.equal(
     planUpload(
       existing.slice(0, 8).map((e) => incoming(e.firstName)),
       existing,
       NOW,
-      PREVIOUS,
+      GRACE,
     ).looksPartial,
     false,
   );
@@ -174,12 +201,12 @@ const PREVIOUS = '2026-10-22T12:00:00.000Z';
 // A corrected record shows up as a possible match, and is not merged.
 {
   const old = known(1, 'Jon', 'needs_contact', '2026-10-01T00:00:00.000Z');
-  const same = planUpload([incoming('John')], [old], NOW, PREVIOUS);
+  const same = planUpload([incoming('John')], [old], NOW, GRACE);
   assert.deepEqual(
     same.possibleMatches.map((m) => m.kind),
     ['address'],
   );
-  const moved = planUpload([incoming('Jon', '99 W OAK ST MESA, AZ 85201')], [old], NOW, PREVIOUS);
+  const moved = planUpload([incoming('Jon', '99 W OAK ST MESA, AZ 85201')], [old], NOW, GRACE);
   assert.deepEqual(
     moved.possibleMatches.map((m) => m.kind),
     ['moved'],

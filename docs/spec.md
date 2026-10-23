@@ -34,7 +34,7 @@ The admin picks the file and presses **Check the file**: nothing is written, and
 
 1. A person not seen before is added as **Needs to be contacted**, unclaimed.
 2. A known person on the sheet has their details refreshed (phone, address, precinct, status date, ...). Their status and volunteer stay, with two exceptions that **flag** them:
-   - **Still uncured**: a volunteer marked them Contacted, and they are still on the sheet. They go back to Needs to be contacted, keep their volunteer, and show on the admin panel. This only happens if they were marked before the *previous* upload ran: someone marked since then may just not have reached the state's data yet.
+   - **Unsuccessful cure** (flag `still_uncured`): a volunteer marked them Contacted, and the sheet still lists them after the **grace period**. They go back to Needs to be contacted, keep their volunteer, and show on the admin panel. The grace is how many uploads may still list a contacted person before this counts: an admin sets it under **Unsuccessful cures** on the admin page, from 0 (the first upload that lists them) to 30, and it starts at 1, because the state's data runs a little behind the phone calls. Each upload that lists a contacted person is one cycle; changing someone's status starts the count over.
    - **Back after being cured**: a Cured person is on the sheet again. They are reopened as Needs to be contacted, keep their old volunteer, and are flagged.
 3. A person who is not on the sheet and not yet Cured becomes **Cured**. They keep their volunteer, so the credit stays.
 4. A volunteer answering the flag (changing the status) or an admin dismissing it clears it.

@@ -87,7 +87,7 @@ const STATUS_LABELS: Record<Status, string> = {
 export const statusLabel = (s: Status): string => STATUS_LABELS[s];
 
 const FLAG_LABELS: Record<Flag, string> = {
-  still_uncured: 'Still uncured after contact',
+  still_uncured: 'Unsuccessful cure: still listed after contact',
   reappeared: 'Back on the list after being cured',
 };
 export const flagLabel = (f: Flag): string => FLAG_LABELS[f];

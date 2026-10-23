@@ -2,7 +2,7 @@
 // erased on both sides.
 
 export type Status = 'needs_contact' | 'left_voicemail' | 'contacted' | 'cured';
-// still_uncured: marked contacted, yet still on a later upload. reappeared: was cured, but is on a later upload again.
+// still_uncured (an unsuccessful cure): marked contacted, yet still on the sheet after the admins' grace period. reappeared: was cured, but is on a later upload again.
 export type Flag = 'still_uncured' | 'reappeared';
 export type ContactMethod = 'call' | 'text' | 'email' | 'in_person' | 'other';
 
@@ -88,6 +88,11 @@ export interface UploadRecord {
   cured: number;
   stillUncured: number;
   reappeared: number;
+}
+
+export interface AdminSettings {
+  // How many uploads a person a volunteer marked contacted may stay on the list before it counts as an unsuccessful cure.
+  graceCycles: number;
 }
 
 export interface AdminStats {

@@ -23,11 +23,12 @@ interface ExistingRow {
   status: ExistingPerson['status'];
   status_changed_at: string;
   flag: ExistingPerson['flag'];
+  contacted_cycles: number;
 }
 
 async function loadExisting(db: Db): Promise<ExistingPerson[]> {
   const { results } = await db
-    .prepare('SELECT id, key, first_name, last_name, address, status, status_changed_at, flag FROM people')
+    .prepare('SELECT id, key, first_name, last_name, address, status, status_changed_at, flag, contacted_cycles FROM people')
     .all<ExistingRow>();
   return results.map((r) => ({
     id: r.id,
@@ -38,6 +39,7 @@ async function loadExisting(db: Db): Promise<ExistingPerson[]> {
     status: r.status,
     statusChangedAt: r.status_changed_at,
     flag: r.flag,
+    contactedCycles: r.contacted_cycles,
   }));
 }
 
@@ -74,10 +76,19 @@ function previewOf(sheet: Sheet, plan: Plan): UploadPreview {
   };
 }
 
+// How many uploads a person marked contacted may stay on the list before it counts as an unsuccessful cure (the admins' setting).
+export const DEFAULT_GRACE_CYCLES = 1;
+export const MAX_GRACE_CYCLES = 30;
+
+export async function graceCycles(db: Db): Promise<number> {
+  const row = await db.prepare("SELECT value FROM settings WHERE key = 'grace_cycles'").first<{ value: string }>();
+  const n = row ? Number(row.value) : Number.NaN;
+  return Number.isSafeInteger(n) && n >= 0 && n <= MAX_GRACE_CYCLES ? n : DEFAULT_GRACE_CYCLES;
+}
+
 async function prepare(db: Db, csv: string, now: string) {
   const sheet = readSheet(csv);
-  const previous = await db.prepare('SELECT created_at FROM uploads ORDER BY id DESC LIMIT 1').first<{ created_at: string }>();
-  const plan = planUpload(sheet.people, await loadExisting(db), now, previous?.created_at ?? null);
+  const plan = planUpload(sheet.people, await loadExisting(db), now, await graceCycles(db));
   return { sheet, plan };
 }
 
@@ -141,7 +152,14 @@ export async function applyUpload(db: Db, csv: string, options: ApplyOptions): P
   }
 
   for (const group of chunks(plan.updates)) {
-    const rows = group.map((u) => ({ id: u.id, status: u.status, flag: u.flag, statusChangedAt: u.statusChangedAt, ...u.incoming }));
+    const rows = group.map((u) => ({
+      id: u.id,
+      status: u.status,
+      flag: u.flag,
+      statusChangedAt: u.statusChangedAt,
+      contactedCycles: u.contactedCycles,
+      ...u.incoming,
+    }));
     statements.push(
       db
         .prepare(
@@ -153,11 +171,12 @@ export async function applyUpload(db: Db, csv: string, options: ApplyOptions): P
                json_extract(value, '$.address') AS address, json_extract(value, '$.city') AS city, json_extract(value, '$.zip') AS zip,
                json_extract(value, '$.precinct') AS precinct, json_extract(value, '$.statusDate') AS status_date,
                json_extract(value, '$.status') AS status, json_extract(value, '$.flag') AS flag,
+               json_extract(value, '$.contactedCycles') AS contacted_cycles,
                json_extract(value, '$.statusChangedAt') AS status_changed_at
              FROM json_each(?))
            UPDATE people SET first_name = j.first_name, middle_name = j.middle_name, last_name = j.last_name, party = j.party,
              legdist = j.legdist, reason_code = j.reason_code, phone = j.phone, address = j.address, city = j.city, zip = j.zip,
-             precinct = j.precinct, status_date = j.status_date, status = j.status, flag = j.flag,
+             precinct = j.precinct, status_date = j.status_date, status = j.status, flag = j.flag, contacted_cycles = j.contacted_cycles,
              status_changed_at = j.status_changed_at, cured_at = NULL, last_upload_id = ?, updated_at = ?
            FROM j WHERE people.id = j.id`,
         )

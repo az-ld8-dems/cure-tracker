@@ -257,6 +257,7 @@ export interface ExistingPerson {
   status: Status;
   statusChangedAt: string;
   flag: Flag | null;
+  contactedCycles: number;
 }
 
 export interface PlannedUpdate {
@@ -265,6 +266,7 @@ export interface PlannedUpdate {
   status: Status;
   flag: Flag | null;
   statusChangedAt: string;
+  contactedCycles: number;
 }
 
 export interface PlannedAudit {
@@ -289,13 +291,15 @@ export interface Plan {
 // How many possible matches an upload preview lists; the preview also says how many there are in all.
 export const MATCH_LIMIT = 25;
 
-// What an upload does to the people already known. `previousUploadAt` is when the upload before this one ran (null for the first).
+// What an upload does to the people already known. `graceCycles` is the admins' setting: how many uploads a person a volunteer marked
+// contacted may stay on the list before it counts as an unsuccessful cure.
 //  - on the sheet, new: added, needs contact.
-//  - on the sheet, known: details refreshed. A cured person who is back is reopened and flagged (reappeared). A person a volunteer
-//    marked contacted is flagged (still_uncured) and goes back to needs contact, but only if they were marked before the previous upload:
-//    one marked since then may simply not have reached the state's sheet yet.
+//  - on the sheet, known: details refreshed. A cured person who is back is reopened and flagged (reappeared).
+//  - on the sheet, marked contacted: each upload that still lists them is one cycle. Once they have had more than `graceCycles` of
+//    them they are an unsuccessful cure: flagged (still_uncured), back to needs contact, with the same volunteer. The grace is for the
+//    state's data being a day or two behind the phone calls.
 //  - not on the sheet, not cured yet: cured. Assignment stays, so the volunteer keeps the credit.
-export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[], now: string, previousUploadAt: string | null): Plan {
+export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[], now: string, graceCycles: number): Plan {
   const byKey = new Map(existing.map((p) => [p.key, p]));
   const onSheet = new Set(incoming.map((p) => p.key));
   const inserts: IncomingPerson[] = [];
@@ -310,20 +314,29 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
       continue;
     }
     let { status, flag, statusChangedAt } = known;
+    let contactedCycles = 0;
     if (known.status === 'cured') {
       status = 'needs_contact';
       flag = 'reappeared';
       statusChangedAt = now;
       reappeared++;
       audit.push({ personId: known.id, action: 'import.reappeared', detail: { was: 'cured' } });
-    } else if (known.status === 'contacted' && previousUploadAt !== null && known.statusChangedAt < previousUploadAt) {
-      status = 'needs_contact';
-      flag = 'still_uncured';
-      statusChangedAt = now;
-      stillUncured++;
-      audit.push({ personId: known.id, action: 'import.still_uncured', detail: { was: 'contacted', since: known.statusChangedAt } });
+    } else if (known.status === 'contacted') {
+      contactedCycles = known.contactedCycles + 1;
+      if (contactedCycles > graceCycles) {
+        status = 'needs_contact';
+        flag = 'still_uncured';
+        statusChangedAt = now;
+        contactedCycles = 0;
+        stillUncured++;
+        audit.push({
+          personId: known.id,
+          action: 'import.still_uncured',
+          detail: { was: 'contacted', since: known.statusChangedAt, graceCycles },
+        });
+      }
     }
-    updates.push({ id: known.id, incoming: p, status, flag, statusChangedAt });
+    updates.push({ id: known.id, incoming: p, status, flag, statusChangedAt, contactedCycles });
   }
   const gone = existing.filter((p) => !onSheet.has(p.key) && p.status !== 'cured');
   const openBefore = existing.filter((p) => p.status !== 'cured').length;

@@ -2,6 +2,7 @@
 // and the admin routes (an email in ADMIN_EMAILS) move people between volunteers, upload the state's sheet and read the audit log.
 // Every change writes an audit row. Only erasable TypeScript syntax.
 import type {
+  AdminSettings,
   AdminStats,
   ApiError,
   AuditEntry,
@@ -16,7 +17,7 @@ import type {
 } from '../src/api.d.ts';
 import type { Db, Stmt } from './db.ts';
 import { ImportError } from './import.ts';
-import { applyUpload, PartialUploadError, previewUpload, uploadRecord } from './uploads.ts';
+import { applyUpload, graceCycles, MAX_GRACE_CYCLES, PartialUploadError, previewUpload, uploadRecord } from './uploads.ts';
 
 export interface ApiContext {
   db: Db;
@@ -288,7 +289,9 @@ async function setStatus(c: Ctx, p: string[], body: Body): Promise<Response> {
   // Acting on a person answers the flag the last upload put on them.
   await c.db.batch([
     c.db
-      .prepare('UPDATE people SET status = ?, status_changed_at = ?, contact_method = ?, flag = NULL, updated_at = ? WHERE id = ?')
+      .prepare(
+        'UPDATE people SET status = ?, status_changed_at = ?, contact_method = ?, flag = NULL, contacted_cycles = 0, updated_at = ? WHERE id = ?',
+      )
       .bind(status, c.now, method, c.now, id),
     auditStmt(c, 'status', id, { from: row.status, to: status, method }),
   ]);
@@ -476,6 +479,27 @@ async function reassignAll(c: Ctx, p: string[], body: Body): Promise<Response> {
   return json({ moved: res.meta.changes });
 }
 
+async function getSettings(c: Ctx): Promise<Response> {
+  const settings: AdminSettings = { graceCycles: await graceCycles(c.db) };
+  return json(settings);
+}
+
+async function putSettings(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  const raw = body.graceCycles;
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0 || raw > MAX_GRACE_CYCLES) {
+    throw new HttpError(400, `graceCycles must be a whole number from 0 to ${MAX_GRACE_CYCLES}`);
+  }
+  const before = await graceCycles(c.db);
+  await c.db.batch([
+    c.db
+      .prepare("INSERT INTO settings (key, value) VALUES ('grace_cycles', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+      .bind(String(raw)),
+    auditStmt(c, 'settings', null, { graceCycles: { from: before, to: raw } }),
+  ]);
+  const settings: AdminSettings = { graceCycles: raw };
+  return json(settings);
+}
+
 interface Route {
   method: 'GET' | 'POST' | 'PUT';
   pattern: RegExp;
@@ -496,6 +520,8 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/stats$/, admin: true, handler: adminStats },
   { method: 'GET', pattern: /^\/api\/admin\/audit$/, admin: true, handler: adminAudit },
   { method: 'GET', pattern: /^\/api\/admin\/uploads$/, admin: true, handler: adminUploads },
+  { method: 'GET', pattern: /^\/api\/admin\/settings$/, admin: true, handler: getSettings },
+  { method: 'PUT', pattern: /^\/api\/admin\/settings$/, admin: true, handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/preview$/, admin: true, handler: uploadPreview },
   { method: 'POST', pattern: /^\/api\/admin\/uploads$/, admin: true, handler: uploadApply },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, admin: true, handler: assign },

@@ -177,6 +177,19 @@ try {
   await admin.getByText('Uploaded. 1 added, 3 cured, 0 flagged.').waitFor();
   await admin.getByText(/Last upload: day2\.csv/).waitFor();
 
+  // The grace period saves, and shows after a reload.
+  await admin.getByLabel('Uploads a contacted person may stay on the list').fill('0');
+  await admin.getByRole('button', { name: 'Save', exact: true }).click();
+  await admin.getByText('Saved: 0 uploads of grace.').waitFor();
+  await admin.reload();
+  await admin.getByRole('heading', { name: 'Unsuccessful cures' }).waitFor();
+  expect(
+    'admin settings',
+    (await admin.getByLabel('Uploads a contacted person may stay on the list').inputValue()) === '0',
+    'the grace was not kept',
+  );
+  await check(admin, 'admin settings');
+
   // A bad file is explained, not swallowed.
   await admin.getByLabel('CSV file').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from('NAME,CITY\nA,B\n') });
   await admin.getByRole('button', { name: 'Check the file' }).click();

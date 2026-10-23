@@ -1,6 +1,6 @@
 // The admin page: upload the state's sheet, see how curing is going, answer the people the upload flagged, move people between
 // volunteers, and read the audit log.
-import type { AdminStats, AuditEntry, Person, UploadPreview, UploadRecord, Volunteer } from './api.d.ts';
+import type { AdminSettings, AdminStats, AuditEntry, Person, UploadPreview, UploadRecord, Volunteer } from './api.d.ts';
 import {
   $,
   ApiFailure,
@@ -28,6 +28,7 @@ if (me && !me.isAdmin) {
   let volunteers = new Map<number, Volunteer>();
   const sections = {
     upload: h('section', { 'aria-labelledby': 'h-upload' }),
+    settings: h('section', { 'aria-labelledby': 'h-settings' }),
     stats: h('section', { 'aria-labelledby': 'h-stats' }),
     flagged: h('section', { 'aria-labelledby': 'h-flagged' }),
     volunteers: h('section', { 'aria-labelledby': 'h-volunteers' }),
@@ -123,7 +124,7 @@ if (me && !me.isAdmin) {
           h('li', {}, h('strong', {}, String(p.added)), 'new people'),
           h('li', {}, h('strong', {}, String(p.updated)), 'already known'),
           h('li', {}, h('strong', {}, String(p.cured)), 'become cured'),
-          h('li', {}, h('strong', {}, String(p.stillUncured)), 'still uncured after contact'),
+          h('li', {}, h('strong', {}, String(p.stillUncured)), 'unsuccessful cures'),
           h('li', {}, h('strong', {}, String(p.reappeared)), 'back after being cured'),
         ),
         h(
@@ -195,6 +196,47 @@ if (me && !me.isAdmin) {
     );
   }
 
+  // ---- the grace period
+  function settingsSection(settings: AdminSettings): void {
+    const grace = h('input', {
+      id: 'grace',
+      type: 'number',
+      min: '0',
+      max: '30',
+      step: '1',
+      inputmode: 'numeric',
+      required: true,
+      value: String(settings.graceCycles),
+    });
+    clear(
+      sections.settings,
+      heading('h-settings', 'Unsuccessful cures'),
+      h(
+        'form',
+        {
+          class: 'panel field',
+          onsubmit: async (event) => {
+            event.preventDefault();
+            try {
+              const saved = await api<AdminSettings>('PUT', '/api/admin/settings', { graceCycles: Number(grace.value) });
+              toast(`Saved: ${plural(saved.graceCycles, 'upload')} of grace.`);
+            } catch (e) {
+              toast(failureText(e), 'error');
+            }
+          },
+        },
+        h('label', { for: 'grace' }, 'Uploads a contacted person may stay on the list'),
+        h(
+          'p',
+          { class: 'muted' },
+          'The state’s data runs behind the phone calls. After a volunteer marks someone contacted, this many uploads may still list them before it counts as an unsuccessful cure.',
+        ),
+        grace,
+        h('div', {}, h('button', { class: 'btn', type: 'submit' }, 'Save')),
+      ),
+    );
+  }
+
   // ---- numbers and people
   function statsSection(s: AdminStats): void {
     const t = s.totals;
@@ -229,7 +271,7 @@ if (me && !me.isAdmin) {
         ? h(
             'p',
             { class: 'muted' },
-            'Nobody is flagged. People show up here when the state’s sheet still lists them after a volunteer marked them contacted, or lists someone who was cured.',
+            'Nobody is flagged. People show up here as an unsuccessful cure (still on the state’s sheet after a volunteer marked them contacted) or when someone who was cured is listed again.',
           )
         : table(
             'People who need another look',
@@ -383,6 +425,11 @@ if (me && !me.isAdmin) {
         return `released by ${who(d.from)}`;
       case 'upload':
         return `uploaded ${String(d.filename)}: ${String(d.added)} added, ${String(d.cured)} cured, ${String(d.stillUncured)} still uncured, ${String(d.reappeared)} back`;
+      case 'settings': {
+        const change = d.graceCycles;
+        const to = typeof change === 'object' && change !== null && 'to' in change ? String(change.to) : '?';
+        return `set the grace to ${to} uploads`;
+      }
       case 'volunteer.rename':
         return `now called ${String(d.to)}`;
       default:
@@ -415,15 +462,17 @@ if (me && !me.isAdmin) {
   }
 
   async function refresh(): Promise<void> {
-    const [stats, people, vols, firstPage] = await Promise.all([
+    const [stats, people, vols, firstPage, settings] = await Promise.all([
       api<AdminStats>('GET', '/api/admin/stats'),
       api<Person[]>('GET', '/api/people'),
       loadVolunteers(),
       api<AuditEntry[]>('GET', '/api/admin/audit?limit=50'),
+      api<AdminSettings>('GET', '/api/admin/settings'),
     ]);
     volunteers = vols;
     everyone = people;
     log = firstPage;
+    settingsSection(settings);
     statsSection(stats);
     flaggedSection(stats);
     volunteersSection(stats);

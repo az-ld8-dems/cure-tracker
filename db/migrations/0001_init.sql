@@ -41,6 +41,8 @@ CREATE TABLE people (
   contact_method TEXT CHECK (contact_method IN ('call', 'text', 'email', 'in_person', 'other')),
   assigned_to INTEGER REFERENCES volunteers (id),
   flag TEXT CHECK (flag IN ('still_uncured', 'reappeared')),
+  -- How many uploads have listed this person since a volunteer last marked them contacted (0 when they are not marked contacted).
+  contacted_cycles INTEGER NOT NULL DEFAULT 0,
   cured_at TEXT,
   first_upload_id INTEGER NOT NULL REFERENCES uploads (id),
   last_upload_id INTEGER NOT NULL REFERENCES uploads (id),
@@ -60,6 +62,13 @@ CREATE TABLE notes (
 ) STRICT;
 
 CREATE INDEX notes_person ON notes (person_id);
+
+-- Settings an admin controls, one row each. grace_cycles: how many uploads a person marked contacted may stay on the list before it counts
+-- as an unsuccessful cure (absent: 1).
+CREATE TABLE settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT;
 
 -- Every change anyone makes. person_id has no foreign key on purpose: the log outlives what it describes.
 CREATE TABLE audit (

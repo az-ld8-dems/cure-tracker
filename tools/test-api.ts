@@ -215,7 +215,7 @@ assert.equal((await call(vera, 'POST', `/api/people/${p4.id}/status`, { status: 
 assert.equal((await call(vera, 'POST', `/api/people/${p4.id}/claim`, {})).status, 409);
 assert.equal((await call(admin, 'POST', `/api/admin/people/${p4.id}/assign`, { volunteerId: vid(walt) })).status, 409);
 
-// Day 3: p1 and p3 are still on the sheet after being contacted before the day 2 upload ran
+// Day 3: p1 and p3 have now been listed by two uploads since they were marked contacted: past the grace of one
 advance(24);
 const up3 = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(day2), filename: 'day3.csv' });
 assert.deepEqual([up3.added, up3.cured, up3.stillUncured], [0, 0, 2]);
@@ -311,5 +311,32 @@ assert.ok(
   'the failure was logged',
 );
 assert.deepEqual([count('people'), count('uploads'), count('audit')], [peopleBefore, uploadsBefore, auditBefore]);
+
+// --- the grace period: how many uploads a person marked contacted may stay on the list before it is an unsuccessful cure
+assert.equal((await call(vera, 'PUT', '/api/admin/settings', { graceCycles: 0 })).status, 403, 'only admins change it');
+assert.equal((await call(vera, 'GET', '/api/admin/settings')).status, 403);
+assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 1 }, 'one cycle of grace until an admin says otherwise');
+for (const bad of [-1, 31, 1.5, null, '2']) {
+  assert.equal((await call(admin, 'PUT', '/api/admin/settings', { graceCycles: bad })).status, 400, `graceCycles ${bad}`);
+}
+
+const fresh =
+  (await ok<Person[]>(vera, 'GET', '/api/people')).find((p) => p.assignedTo === null && p.status === 'needs_contact') ??
+  assert.fail('an open person');
+await ok(vera, 'POST', `/api/people/${fresh.id}/claim`, {});
+await ok(vera, 'POST', `/api/people/${fresh.id}/status`, { status: 'contacted' });
+advance(24);
+const withGrace = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(day4) });
+assert.equal(withGrace.stillUncured, 0, 'the first upload after the call is within a grace of one');
+
+assert.deepEqual(await ok(admin, 'PUT', '/api/admin/settings', { graceCycles: 0 }), { graceCycles: 0 });
+assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 0 });
+const noGrace = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(day4) });
+assert.equal(noGrace.stillUncured, 1, 'with no grace it is an unsuccessful cure at once');
+await ok(admin, 'POST', '/api/admin/uploads', { csv: csv(day4) });
+const unsuccessful = (await ok<Person[]>(vera, 'GET', '/api/people')).find((p) => p.id === fresh.id) ?? assert.fail('fresh');
+assert.deepEqual([unsuccessful.status, unsuccessful.flag, unsuccessful.assignedTo], ['needs_contact', 'still_uncured', vid(vera)]);
+const settingsLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=200')).find((e) => e.action === 'settings');
+assert.deepEqual(settingsLog?.detail, { graceCycles: { from: 1, to: 0 } });
 
 console.log('test-api: ok');
