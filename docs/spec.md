@@ -4,7 +4,7 @@
 
 - **Everyone signed in** sees every person on the list and every note. Access decides who gets in; there is no per-person privacy inside the app.
 - **Volunteer**: anyone Access lets in. Their first visit asks for a name. They can claim an unclaimed person, release their own claims, set a status, choose how they reached the person, and add notes on their own people.
-- **Admin**: an email in `ADMIN_EMAILS` (`wrangler.jsonc`). Admins can do all of the above on anyone's people, plus: upload the sheet, move one person or all of a volunteer's open people to someone else (or back to the pool), dismiss flags, read the audit log.
+- **Admin**: an email in the `ADMIN_EMAILS` Worker secret (`npx wrangler secret put ADMIN_EMAILS`, comma-separated; docs/setup.md). Admins can do all of the above on anyone's people, plus: upload the sheet, move one person or all of a volunteer's open people to someone else (or back to the pool), dismiss flags, read the audit log.
 - A service token (a machine caller) is refused: the app needs an email.
 
 ## Statuses

@@ -22,9 +22,10 @@ A later schema change is a new file in `db/migrations/`; run the same command ag
 2. **Access, Applications, Add, Self-hosted.** Name `cure-tracker`, the domain you will deploy to (a `*.workers.dev` hostname does not work with Access in the same way; use a custom domain such as `cure.example.org`), no path. Session duration: the length of the campaign push is fine.
 3. **Policy:** Action Allow, Include **Emails**, one entry per volunteer and admin. Access's free plan covers 50 users. A person not in the policy never reaches the app.
 4. Open the application's settings and copy the **Application Audience (AUD) Tag** and your **team domain** (`yourteam.cloudflareaccess.com`).
-5. Put them in `wrangler.jsonc` under `vars`: `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`, and list the admins' emails in `ADMIN_EMAILS` (comma-separated). None of them are secrets. While `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is empty, the Worker refuses every request.
+5. Put them in `wrangler.jsonc` under `vars`: `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`. They are not secrets. While either is empty, the Worker refuses every request.
+6. Set the admins as a Worker secret, not in the repo: `npx wrangler secret put ADMIN_EMAILS` (if it offers to create the Worker first, say yes), and paste the admins' emails, comma-separated. It applies at once, with no deploy, and a later `wrangler deploy` keeps it. To change the admins, run the same command with the new list. While the secret is missing nobody is an admin: the admin pages and routes refuse everyone.
 
-Roles: an email in the Access policy is a volunteer; an email also in `ADMIN_EMAILS` is an admin. Adding a volunteer is adding their email to the policy; removing one is removing it (and, to end a session that has not expired, revoking it under Access, Users). Changing `ADMIN_EMAILS` needs a deploy.
+Roles: an email in the Access policy is a volunteer; an email also in `ADMIN_EMAILS` is an admin. Adding a volunteer is adding their email to the policy; removing one is removing it (and, to end a session that has not expired, revoking it under Access, Users). Changing `ADMIN_EMAILS` is `wrangler secret put` again, not a deploy.
 
 ## 3. Deploy
 

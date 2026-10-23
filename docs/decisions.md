@@ -2,7 +2,7 @@
 
 1. **One Worker, one D1 database, no framework** (2026-10-23, Avi). Serves the pages, the API and the Access check. A couple of weeks of life does not justify more.
 2. **No backups; D1 Time Travel only** (Avi). 30 days of point-in-time restore covers the lifetime of the app.
-3. **Access for sign-in, with one-time PIN for volunteers without Gmail** (Avi). Emails go in the Access policy. Admins are `ADMIN_EMAILS` in `wrangler.jsonc`, because the Cloudflare team can add volunteers and no app-side user table is needed. About 20 volunteers fits Access's free tier.
+3. **Access for sign-in, with one-time PIN for volunteers without Gmail** (Avi). Emails go in the Access policy. Admins are the `ADMIN_EMAILS` Worker secret (it began as a variable in `wrangler.jsonc`; Avi moved it to a secret so the emails are not in git and changing them needs no deploy), because the Cloudflare team can add volunteers and no app-side user table is needed. About 20 volunteers fits Access's free tier.
 4. **Everyone sees everything** (Avi). The current sheet works that way; the app adds who may change what, not who may see what.
 5. **People are keyed by normalized first name, last name and address** (Avi). The state's sheets do not reliably carry a voter id. Near-misses are reported on upload, never merged.
 6. **Only an upload cures** (Avi). A volunteer's "Contacted" is a claim; the state's data is the verification. A contacted person still on a later sheet is flagged for the admin and returns to needs-contact with the same volunteer.

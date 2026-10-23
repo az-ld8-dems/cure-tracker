@@ -98,6 +98,16 @@ assert.equal((await call(admin, 'GET', '/admin/')).status, 200);
 assert.deepEqual(assetCalls, ['/admin/'], 'only the admin got as far as the assets');
 assert.equal((await call(vera, 'GET', '/')).status, 200);
 
+// Without the ADMIN_EMAILS secret nobody is an admin: the pages and the API stay closed to everyone, the listed admin included.
+{
+  const noSecret = { ...env, ADMIN_EMAILS: undefined };
+  const get = async (path: string) =>
+    handle(new Request(`https://cure.example${path}`), noSecret, { verifier: verifierFor(admin), now: () => clock });
+  assert.equal(((await (await get('/api/me')).json()) as Me).isAdmin, false);
+  assert.equal((await get('/api/admin/stats')).status, 403);
+  assert.equal((await get('/admin/')).status, 403);
+}
+
 // --- me
 const me = await ok<Me>(vera, 'GET', '/api/me');
 assert.deepEqual([me.email, me.name, me.isAdmin], [vera, '', false]);

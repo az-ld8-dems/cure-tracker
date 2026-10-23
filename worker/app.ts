@@ -7,8 +7,8 @@ import { handleApi } from './api.ts';
 import type { Db } from './db.ts';
 
 export interface AppEnv extends AccessEnv {
-  // Comma-separated emails that get the admin pages.
-  ADMIN_EMAILS: string;
+  // Comma-separated emails that get the admin pages: a Worker secret (wrangler secret put ADMIN_EMAILS). Missing means no admins.
+  ADMIN_EMAILS: string | undefined;
   // "true" lets admins reset (delete every voter). Anything else turns the reset off.
   ALLOW_RESET: string;
   DB: Db;
@@ -30,7 +30,8 @@ export async function handle(request: Request, env: AppEnv, deps: Deps = {}): Pr
   const email = access.identity.email?.toLowerCase() ?? null;
   // A service token has no email, so no volunteer to be.
   if (email === null) return text(403, 'Forbidden');
-  const admins = env.ADMIN_EMAILS.split(',')
+  const admins = (env.ADMIN_EMAILS ?? '')
+    .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter((e) => e !== '');
   const isAdmin = admins.includes(email);
