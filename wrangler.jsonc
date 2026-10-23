@@ -1,0 +1,37 @@
+{
+  // The cure tracker: one Worker serves the pages (static assets), the JSON API and the Access check. Cloudflare Access (Zero Trust,
+  // one-time PIN for volunteers without a Google account) sits in front, and the Worker verifies the token again (worker/access.ts),
+  // so a request that skipped Access gets a 403. Setup by hand: docs/setup.md.
+  "name": "cure-tracker",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-11",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  // Every request goes through the Worker first (run_worker_first), so no file is served without the token check.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cure-tracker",
+      // Fill in by hand after `wrangler d1 create cure-tracker` (docs/setup.md). Not a secret.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "db/migrations"
+    }
+  ],
+  "vars": {
+    // Fill in by hand after creating the Access application (docs/setup.md); they are not secrets. While either is empty the
+    // Worker refuses every request. The team domain looks like "yourteam.cloudflareaccess.com".
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    // Comma-separated emails that get the admin pages. Everyone else the Access policy lets in is a volunteer.
+    "ADMIN_EMAILS": ""
+  }
+}

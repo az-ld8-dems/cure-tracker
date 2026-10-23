@@ -1,0 +1,51 @@
+name: ci
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+concurrency:
+  # A newer push to a pull request cancels the older run: CI minutes are billed.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  checks:
+    # Everything that needs no browser, in one job: each job pays for its own checkout and `npm ci`. Steps after `npm ci` run even
+    # when an earlier one failed (`!cancelled()`), so one run reports every finding.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Types for the Worker, the pages and the tools
+        run: npm run typecheck
+        if: ${{ !cancelled() }}
+      - name: Tests (Access token check, sheet import, API, Lighthouse budget rules)
+        run: npm test
+        if: ${{ !cancelled() }}
+      - name: Biome
+        # Lint and format: default rules, warnings fail the job.
+        run: npm run check
+        if: ${{ !cancelled() }}
+
+  browser:
+    # The smoke test (a real browser through every flow, with axe in light and dark at phone and desktop width) and the Lighthouse
+    # budgets. Chromium only: this is an internal tool.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run smoke
+      - name: Lighthouse budgets
+        if: ${{ !cancelled() }}
+        run: npm run lighthouse
