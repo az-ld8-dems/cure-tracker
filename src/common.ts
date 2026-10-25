@@ -183,6 +183,20 @@ export function facts(p: Person, volunteers: Map<number, Volunteer>, withVolunte
 
 // ---- the chrome
 
+// The account menu is a <details>; it also closes on Escape (focus returns to its summary) and on a click anywhere else.
+function wireAccountMenu(): void {
+  const menu = document.querySelector('#account');
+  if (!(menu instanceof HTMLDetailsElement)) return;
+  document.addEventListener('click', (e) => {
+    if (menu.open && e.target instanceof Node && !menu.contains(e.target)) menu.open = false;
+  });
+  menu.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !menu.open) return;
+    menu.open = false;
+    menu.querySelector('summary')?.focus();
+  });
+}
+
 // Loads who is signed in, fills the header, and, on a first visit, asks for a name before showing anything. Returns null while the
 // name is still missing (the page stops there; saving the name reloads it).
 export async function boot(): Promise<Me | null> {
@@ -196,6 +210,7 @@ export async function boot(): Promise<Me | null> {
   }
   $('#nav-admin').hidden = !me.isAdmin;
   $('#who').textContent = me.name || me.email;
+  wireAccountMenu();
   if (me.name !== '') return me;
 
   const app = document.querySelector('#app');

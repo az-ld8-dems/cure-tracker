@@ -289,7 +289,9 @@ async function setStatus(c: Ctx, p: string[], body: Body): Promise<Response> {
   const row = await personRow(c, id);
   mayChange(c, row);
   if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
-  const method = rawMethod === undefined ? row.contact_method : ((rawMethod as ContactMethod | null) ?? null);
+  const said = rawMethod === undefined ? row.contact_method : ((rawMethod as ContactMethod | null) ?? null);
+  // A voicemail is a phone call. A text is also filed under this status, so only a method left unsaid becomes a call.
+  const method = status === 'left_voicemail' && said === null ? 'call' : said;
   // Acting on a person answers the flag the last upload put on them.
   await c.db.batch([
     c.db

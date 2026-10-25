@@ -92,6 +92,29 @@ h3 {
   height: auto;
 }
 
+/* Both logos are in the page; the one that does not match the theme is not shown (and the dark one is lazy, so it is not fetched) */
+.site-header__brand .logo--dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .site-header__brand .logo--light {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .site-header__brand .logo--dark {
+    display: block;
+  }
+}
+
+:root[data-theme="dark"] .site-header__brand .logo--light {
+  display: none;
+}
+
+:root[data-theme="dark"] .site-header__brand .logo--dark {
+  display: block;
+}
+
 .nav {
   display: flex;
   flex-wrap: wrap;
@@ -120,12 +143,64 @@ h3 {
   color: var(--brand);
 }
 
-.who {
+/* The account menu: the signed-in name opens a small panel with the theme switch and Sign out. common.ts closes it on Escape or a click outside. */
+.account {
+  position: relative;
+}
+
+.account > summary {
+  max-width: 14rem;
+  padding: var(--space-xs) var(--space-3xs);
+  overflow: hidden;
   color: var(--muted);
   font-size: 13px;
   line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
 }
 
+.account > summary::-webkit-details-marker {
+  display: none;
+}
+
+.account > summary::after {
+  content: " \25BE";
+}
+
+.account > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.account__panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  min-width: 12rem;
+  padding: var(--space-sm);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+@media (min-width: 40rem) {
+  .account__panel {
+    right: 0;
+    left: auto;
+  }
+}
+
+.account__panel .fl-field {
+  align-self: stretch;
+}
 /* Page: Frostline's frame (fl-page), with room below for a phone's home indicator */
 .page {
   padding-block: var(--space-6) var(--space-3xl);
@@ -207,6 +282,14 @@ h3 {
 /* Frostline sizes its own buttons to their content inside a card; the LD8 button should too */
 .fl-card > .btn {
   justify-self: start;
+}
+
+/* The status badge sits under the name, never beside it, however wide the card is */
+.card-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
 }
 
 /* The three status buttons share the card's width, and their words wrap inside them */

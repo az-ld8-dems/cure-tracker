@@ -148,7 +148,7 @@ if (me) {
     return h(
       'li',
       { class: 'fl-card', 'data-id': String(p.id) },
-      h('div', { class: 'fl-card__head' }, h('h2', { class: 'fl-card__title' }, personName(p)), statusBadge(p.status)),
+      h('div', { class: 'card-head' }, h('h2', { class: 'fl-card__title' }, personName(p)), statusBadge(p.status)),
       p.flag ? flagBadge(p.flag) : null,
       facts(p, volunteers, false),
       h('div', { class: 'fl-field' }, h('span', { class: 'fl-label' }, 'What happened?'), seg),
