@@ -1,0 +1,43 @@
+{
+  // The cure tracker: one Worker serves the pages (static assets), the JSON API and the Access check. Cloudflare Access (Zero Trust,
+  // one-time PIN for volunteers without a Google account) sits in front, and the Worker verifies the token again (worker/access.ts),
+  // so a request that skipped Access gets a 403. Setup by hand: docs/setup.md.
+  "name": "cure-tracker",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-11",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  // Every request goes through the Worker first (run_worker_first), so no file is served without the token check.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "d1_databases": [
+    {
+      // The Worker reads this as env.DB (worker/app.ts); `wrangler d1 create` suggests another name, so do not paste its snippet over this one.
+      "binding": "DB",
+      "database_name": "cure-tracker",
+      "database_id": "88c0fbb3-cffa-4f0d-afad-4696fa9c4e8f",
+      "migrations_dir": "db/migrations"
+    }
+  ],
+  // The admins' emails are a secret, not a variable, so they are not in git and changing them needs no deploy:
+  //   npx wrangler secret put ADMIN_EMAILS      (paste the emails, comma-separated; it applies right away)
+  // Listed here so `wrangler types` knows about it. While it is missing nobody is an admin (docs/setup.md).
+  "secrets": {
+    "required": ["ADMIN_EMAILS"]
+  },
+  "vars": {
+    // From the Access application (docs/setup.md); they are not secrets. While either is empty the Worker refuses every request.
+    "ACCESS_TEAM_DOMAIN": "az-ld8-dems.cloudflareaccess.com",
+    "ACCESS_AUD": "709960b7f7885b0efe46716b0681f7b5c8220a08f3cd372a93463a8f2a8193c0",
+    // "true" lets admins delete every voter from the admin page (for playing with test data). Set it to "false" and deploy before the real
+    // sheet goes in: the route then refuses and the button is gone. D1 Time Travel can undo a reset for 30 days either way (docs/setup.md).
+    "ALLOW_RESET": "true"
+  }
+}

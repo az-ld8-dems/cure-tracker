@@ -1,0 +1,123 @@
+/* Tokens. Two sets live here. The first is the Arizona LD8 Democrats design system's (warm paper, logo blue, copper for the one call to
+   action, Barlow Condensed and Public Sans), with the same names, plus the numeric space steps. The second, at the bottom of each theme,
+   gives the token names the vendored Frostline components read (vendor/frostline) the LD8 values, so those components look like LD8 and
+   Frostline's own palette (Nord) and fonts (IBM Plex) are never shipped. docs/design.md has the table.
+   Two LD8 names collide with Frostline names that mean something else, so the LD8 ones are prefixed: --ld8-accent (copper; Frostline's
+   --accent is the interactive color, here the logo blue) and --ld8-surface (panels; Frostline's --surface is the page ground). */
+
+@font-face {
+  font-family: "Barlow Condensed";
+  src: url("/fonts/BarlowCondensed-Bold-latin.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Public Sans";
+  src: url("/fonts/PublicSans-Variable-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+
+  /* LD8 colors */
+  --bg: #faf7f2;
+  --ld8-surface: #f1ece3;
+  --surface-raised: #fff;
+  --ink: #14202e;
+  --muted: #4a5566;
+  --border: #d9d2c5;
+  --border-strong: #7a8394;
+  --brand: #1f497d;
+  --brand-strong: #12294a;
+  --brand-tint: #e3ebf5;
+  --on-brand: #fff;
+  --ld8-accent: #b4501f;
+  --ld8-accent-strong: #8a3a13;
+  --ld8-on-accent: #fff;
+  --sun: #f2b84b;
+  --deep: #12294a;
+  --on-deep: #fff;
+  --focus: #1f497d;
+  --success: #2f6b4f;
+  --danger: #a3262a;
+  --shadow-card: 0 1px 2px #14202e1f, 0 4px 12px #14202e14;
+  --shadow-header: 0 2px 0 #d9d2c5;
+
+  /* LD8 type, spacing, shape. The space steps are Frostline's too (4px base), under both names. */
+  --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-sans: "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 72px;
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --container-max: 72rem;
+
+  /* Frostline's names, with LD8 values */
+  --surface: var(--bg);
+  --surface-sunken: var(--ld8-surface);
+  --ink-muted: var(--muted);
+  --accent: var(--brand);
+  --accent-hover: var(--brand-strong);
+  --on-accent: var(--on-brand);
+  --focus-ring: var(--focus);
+  --warning: #7b5915;
+  --space-1: var(--space-2xs);
+  --space-2: var(--space-xs);
+  --space-3: var(--space-sm);
+  --space-4: var(--space-md);
+  --space-6: var(--space-lg);
+  --space-8: var(--space-xl);
+  --space-12: var(--space-2xl);
+  --radius-md: var(--radius);
+  --radius-full: var(--radius-pill);
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --shadow-sm: 0 1px 2px #14202e29;
+  --shadow-md: 0 6px 16px #14202e2e;
+  --scrim: #14202e8c;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%234a5566' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1a2b;
+    --ld8-surface: #162539;
+    --surface-raised: #1c2f47;
+    --ink: #eef2f7;
+    --muted: #a9b6c8;
+    --border: #2f4560;
+    --border-strong: #7f93ad;
+    --brand: #8db4e8;
+    --brand-strong: #b9d3f3;
+    --brand-tint: #1d3250;
+    --on-brand: #0e1a2b;
+    --ld8-accent: #f2a36b;
+    --ld8-accent-strong: #f7bf94;
+    --ld8-on-accent: #1a0e06;
+    --deep: #0a1322;
+    --focus: #8db4e8;
+    --success: #7fcf9f;
+    --danger: #f19a9a;
+    --shadow-card: 0 1px 2px #00000066;
+    --shadow-header: 0 2px 0 #2f4560;
+
+    --warning: #ebcb8b;
+    --shadow-sm: 0 1px 2px #00000073;
+    --shadow-md: 0 6px 16px #00000080;
+    --scrim: #00000099;
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23a9b6c8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+}

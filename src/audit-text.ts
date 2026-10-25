@@ -1,0 +1,55 @@
+// What an audit log row says in words. Pure, so Node tests it (tools/test-format.ts); the admin page supplies who a volunteer id is.
+import type { AuditEntry } from './api.d.ts';
+
+const STATUS_WORDS: Record<string, string> = {
+  needs_contact: 'needs to be contacted',
+  left_voicemail: 'left voicemail / texted flyer',
+  contacted: 'contacted',
+  cured: 'cured',
+};
+
+const status = (v: unknown): string => (typeof v === 'string' ? (STATUS_WORDS[v] ?? v) : '?');
+const count = (n: unknown, one: string, many = `${one}s`): string => `${String(n)} ${n === 1 ? one : many}`;
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+// `who` names a volunteer by id; null (or an id nobody has) is the pool.
+export function describeAudit(e: AuditEntry, who: (id: number | null) => string): string {
+  const d = e.detail;
+  const volunteer = (v: unknown): string => who(typeof v === 'number' ? v : null);
+  switch (e.action) {
+    case 'claim':
+      return 'claimed';
+    case 'release':
+      return 'released back to the pool';
+    case 'status':
+      return `marked ${status(d.to)} (was ${status(d.from)})`;
+    case 'note':
+      return 'added a note';
+    case 'assign':
+      return `moved from ${volunteer(d.from)} to ${volunteer(d.to)}`;
+    case 'reassign':
+      return `moved ${count(d.count, 'person', 'people')} from ${volunteer(d.from)} to ${volunteer(d.to)}`;
+    case 'flag.dismiss':
+      return 'dismissed the flag';
+    case 'import.cured':
+      return 'cured: no longer on the state’s sheet';
+    case 'import.still_uncured':
+      return 'unsuccessful cure: still on the sheet after contact';
+    case 'import.reappeared':
+      return 'back on the sheet after being cured';
+    case 'upload':
+      return `uploaded ${String(d.filename)}: ${String(d.added)} added, ${String(d.cured)} cured, ${count(d.stillUncured, 'unsuccessful cure')}, ${String(d.reappeared)} back after being cured`;
+    case 'settings': {
+      const change = isRecord(d.graceCycles) ? d.graceCycles : {};
+      return `set the grace period to ${count(change.to, 'upload')} (was ${String(change.from)})`;
+    }
+    case 'reset':
+      return `deleted all voters (${count(d.people, 'person', 'people')}, ${count(d.notes, 'note')}, ${count(d.uploads, 'upload')})`;
+    case 'volunteer.join':
+      return 'signed in for the first time';
+    case 'volunteer.rename':
+      return `now called ${String(d.to)}`;
+    default:
+      return e.action.replace('.', ' ');
+  }
+}

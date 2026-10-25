@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>LD8 Democrats site icon</title>
+  <rect width="64" height="64" rx="14" fill="#1f497d"></rect>
+  <circle cx="32" cy="30" r="13" fill="#f2b84b"></circle>
+  <rect x="6" y="38" width="52" height="18" fill="#ffffff"></rect>
+  <path d="M10 58v-2a6 6 0 0 1 12 0v2zM26 58v-2a6 6 0 0 1 12 0v2zM42 58v-2a6 6 0 0 1 12 0v2z" fill="#1f497d"></path>
+  <rect x="6" y="36" width="52" height="3" fill="#ffffff"></rect>
+</svg>

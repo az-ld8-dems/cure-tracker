@@ -1,0 +1,43 @@
+{
+  "name": "cure-tracker",
+  "private": true,
+  "description": "Ballot cure tracker for LD8: assigns volunteers to voters whose ballots need curing. Internal tool; lives a couple of weeks.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tools/build.sh",
+    "dev": "node tools/dev.ts",
+    "typecheck": "wrangler types --config wrangler.jsonc --path worker/worker-configuration.d.ts && tsc -p worker && tsc -p vendor/frostline --noEmit && tsc -p src --noEmit && tsc -p tools",
+    "test": "npm run test:access && npm run test:import && npm run test:format && npm run test:api && npm run test:lighthouse",
+    "test:access": "node tools/test-access.ts",
+    "test:import": "node tools/test-import.ts",
+    "test:api": "node tools/test-api.ts",
+    "test:lighthouse": "node tools/test-lighthouse-budgets.ts",
+    "smoke": "node tools/smoke.ts",
+    "lighthouse": "node tools/lighthouse.ts",
+    "check": "biome ci --error-on-warnings",
+    "lint": "biome lint",
+    "format": "biome check --write --linter-enabled=false",
+    "fix": "biome check --write",
+    "deploy": "tools/build.sh && wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply cure-tracker --remote",
+    "db:migrate:local": "wrangler d1 migrations apply cure-tracker --local",
+    "test:format": "node tools/test-format.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "24.19.2",
+    "lighthouse": "13.5.0",
+    "playwright": "1.64.0",
+    "typescript": "7.0.2",
+    "wrangler": "4.149.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261006.1": true,
+    "fsevents": false
+  }
+}

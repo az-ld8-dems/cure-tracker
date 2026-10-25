@@ -1,0 +1,21 @@
+{
+  // Type-checks the dev tools and the Worker modules they import. Nothing here is emitted: Node 24 runs the .ts files directly by
+  // stripping the types, which is why erasableSyntaxOnly and verbatimModuleSyntax are on and imports spell out the .ts extension.
+  // worker/index.ts is left out: it uses the Worker-only global types, which worker/tsconfig.json checks.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["./**/*.ts", "../src/api.d.ts", "../vendor/frostline/components/index.d.ts"]
+}
