@@ -19,10 +19,9 @@
   },
   "d1_databases": [
     {
-      "binding": "DB",
+      "binding": "cure_tracker",
       "database_name": "cure-tracker",
-      // Fill in by hand after `wrangler d1 create cure-tracker` (docs/setup.md). Not a secret.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "88c0fbb3-cffa-4f0d-afad-4696fa9c4e8f",
       "migrations_dir": "db/migrations"
     }
   ],
@@ -35,8 +34,8 @@
   "vars": {
     // Fill in by hand after creating the Access application (docs/setup.md); they are not secrets. While either is empty the
     // Worker refuses every request. The team domain looks like "yourteam.cloudflareaccess.com".
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": "",
+    "ACCESS_TEAM_DOMAIN": "az-ld8-dems.cloudflareaccess.com",
+    "ACCESS_AUD": "709960b7f7885b0efe46716b0681f7b5c8220a08f3cd372a93463a8f2a8193c0",
     // Comma-separated emails that get the admin pages. Everyone else the Access policy lets in is a volunteer.
     // "true" lets admins delete every voter from the admin page (for playing with test data). Set it to "false" and deploy before the real
     // sheet goes in: the route then refuses and the button is gone. D1 Time Travel can undo a reset for 30 days either way (docs/setup.md).
