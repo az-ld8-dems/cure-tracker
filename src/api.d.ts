@@ -43,6 +43,15 @@ export interface Person {
   notesCount: number;
 }
 
+// One page of GET /api/people. `total` counts everyone the filters match; `open` (the pool scope) counts everyone in the pool, filters or
+// not. `facets` (the pool scope, when asked for with facets=1) lists the values the filters offer.
+export interface PeoplePage {
+  people: Person[];
+  total: number;
+  open?: number;
+  facets?: { cities: string[]; parties: string[]; precincts: string[] };
+}
+
 export interface Note {
   id: number;
   body: string;

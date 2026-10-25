@@ -6,6 +6,7 @@ import type {
   AdminStats,
   AuditEntry,
   Me,
+  PeoplePage,
   Person,
   PersonDetail,
   ResetResult,
@@ -62,6 +63,16 @@ async function call(as: string | null, method: string, path: string, body?: unkn
     // not JSON
   }
   return { status: res.status, data };
+}
+
+// Everyone, as an admin sees them: the pages of GET /api/people?scope=all, put together and put in id order.
+async function everyone(): Promise<Person[]> {
+  const out: Person[] = [];
+  for (;;) {
+    const page = await ok<PeoplePage>(admin, 'GET', `/api/people?scope=all&limit=200&offset=${out.length}`);
+    out.push(...page.people);
+    if (page.people.length === 0 || out.length >= page.total) return out.sort((a, b) => a.id - b.id);
+  }
 }
 
 async function ok<T>(as: string, method: string, path: string, body?: unknown): Promise<T> {
@@ -131,14 +142,14 @@ assert.equal((await call(vera, 'PUT', '/api/people/abc')).status, 404);
 // --- upload: preview changes nothing, apply does
 const preview = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(base) });
 assert.deepEqual([preview.added, preview.updated, preview.cured], [30, 0, 0]);
-assert.equal((await ok<Person[]>(vera, 'GET', '/api/people')).length, 0, 'a preview writes nothing');
+assert.equal((await everyone()).length, 0, 'a preview writes nothing');
 const bad = await call(admin, 'POST', '/api/admin/uploads/preview', { csv: 'FIRST,LAST\nA,B\n' });
 assert.equal(bad.status, 422);
 assert.match((bad.data as { error: string }).error, /ADDRESS/);
 
 const first = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(base), filename: 'day1.csv' });
 assert.equal(first.id, 1);
-const people = await ok<Person[]>(vera, 'GET', '/api/people');
+const people = await everyone();
 assert.equal(people.length, 30);
 assert.ok(people.every((p) => p.status === 'needs_contact' && p.assignedTo === null && p.flag === null));
 const p1 = people[0] ?? assert.fail('no people');
@@ -147,7 +158,7 @@ assert.equal(p1.daysUncured, 22, 'days from the sheet date (10/01/2026) to today
 
 // The date in Arizona, not UTC: 2026-10-24 03:00 UTC is still the 23rd in Phoenix.
 advance(15);
-assert.equal((await ok<Person[]>(vera, 'GET', '/api/people'))[0]?.daysUncured, 22);
+assert.equal((await everyone())[0]?.daysUncured, 22);
 advance(-15);
 
 // --- claims
@@ -220,7 +231,7 @@ const day2 = base
   .concat([{ first: 'Newt', last: 'Newman', address: '5 W NEW ST TEMPE, AZ 85281', precinct: 'ASU WEST' }]);
 const partial = await call(admin, 'POST', '/api/admin/uploads', { csv: csv(day2.slice(0, 5)) });
 assert.equal(partial.status, 409, 'a file that would cure nearly everyone needs a yes');
-assert.equal((await ok<Person[]>(vera, 'GET', '/api/people')).filter((p) => p.status === 'cured').length, 0, 'and changed nothing');
+assert.equal((await everyone()).filter((p) => p.status === 'cured').length, 0, 'and changed nothing');
 const up2 = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(day2), filename: 'day2.csv' });
 assert.deepEqual(
   [up2.added, up2.updated, up2.cured, up2.stillUncured, up2.reappeared],
@@ -228,7 +239,7 @@ assert.deepEqual(
   'p1 was contacted after the day 1 upload: not flagged yet',
 );
 
-const after2 = await ok<Person[]>(vera, 'GET', '/api/people');
+const after2 = await everyone();
 const byId = (id: number) => after2.find((p) => p.id === id) ?? assert.fail(`person ${id}`);
 assert.equal(byId(p4.id).status, 'cured');
 assert.equal(byId(p4.id).assignedTo, vid(vera), 'a cured person keeps their volunteer');
@@ -242,7 +253,7 @@ assert.equal((await call(admin, 'POST', `/api/admin/people/${p4.id}/assign`, { v
 advance(24);
 const up3 = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(day2), filename: 'day3.csv' });
 assert.deepEqual([up3.added, up3.cured, up3.stillUncured], [0, 0, 2]);
-const after3 = await ok<Person[]>(vera, 'GET', '/api/people');
+const after3 = await everyone();
 const p1c = after3.find((p) => p.id === p1.id) ?? assert.fail('p1');
 assert.deepEqual(
   [p1c.status, p1c.flag, p1c.assignedTo],
@@ -255,7 +266,7 @@ advance(24);
 const day4 = day2.concat([base[3] ?? assert.fail('base 3')]);
 const up4 = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads', { csv: csv(day4) });
 assert.deepEqual([up4.reappeared, up4.added], [1, 0]);
-const p4b = (await ok<Person[]>(vera, 'GET', '/api/people')).find((p) => p.id === p4.id) ?? assert.fail('p4');
+const p4b = (await everyone()).find((p) => p.id === p4.id) ?? assert.fail('p4');
 assert.deepEqual([p4b.status, p4b.flag, p4b.assignedTo], ['needs_contact', 'reappeared', vid(vera)]);
 
 // --- the admin panel
@@ -283,7 +294,7 @@ assert.equal((await call(vera, 'POST', `/api/admin/people/${p3.id}/assign`, { vo
 const moved = await ok<{ moved: number }>(admin, 'POST', `/api/admin/volunteers/${vid(vera)}/reassign`, { volunteerId: vid(walt) });
 assert.equal(moved.moved, 2, "p1 and p4 were still Vera's");
 assert.equal((await call(admin, 'POST', `/api/admin/volunteers/${vid(vera)}/reassign`, { volunteerId: vid(vera) })).status, 400);
-assert.equal((await ok<Person[]>(vera, 'GET', '/api/people')).filter((p) => p.assignedTo === vid(vera) && p.status !== 'cured').length, 0);
+assert.equal((await everyone()).filter((p) => p.assignedTo === vid(vera) && p.status !== 'cured').length, 0);
 
 // --- the audit log records all of it
 const log = await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=200');
@@ -346,9 +357,7 @@ for (const bad of [-1, 31, 1.5, null, '2']) {
   assert.equal((await call(admin, 'PUT', '/api/admin/settings', { graceCycles: bad })).status, 400, `graceCycles ${bad}`);
 }
 
-const fresh =
-  (await ok<Person[]>(vera, 'GET', '/api/people')).find((p) => p.assignedTo === null && p.status === 'needs_contact') ??
-  assert.fail('an open person');
+const fresh = (await everyone()).find((p) => p.assignedTo === null && p.status === 'needs_contact') ?? assert.fail('an open person');
 await ok(vera, 'POST', `/api/people/${fresh.id}/claim`, {});
 await ok(vera, 'POST', `/api/people/${fresh.id}/status`, { status: 'contacted' });
 advance(24);
@@ -360,7 +369,7 @@ assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 0
 const noGrace = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(day4) });
 assert.equal(noGrace.stillUncured, 1, 'with no grace it is an unsuccessful cure at once');
 await ok(admin, 'POST', '/api/admin/uploads', { csv: csv(day4) });
-const unsuccessful = (await ok<Person[]>(vera, 'GET', '/api/people')).find((p) => p.id === fresh.id) ?? assert.fail('fresh');
+const unsuccessful = (await everyone()).find((p) => p.id === fresh.id) ?? assert.fail('fresh');
 assert.deepEqual([unsuccessful.status, unsuccessful.flag, unsuccessful.assignedTo], ['needs_contact', 'still_uncured', vid(vera)]);
 const settingsLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=200')).find((e) => e.action === 'settings');
 assert.deepEqual(settingsLog?.detail, { graceCycles: { from: 1, to: 0 } });
@@ -383,7 +392,7 @@ assert.deepEqual(wiped.deleted, { people: peopleN, notes: notesN, uploads: uploa
 assert.deepEqual([count('people'), count('notes'), count('uploads')], [0, 0, 0]);
 assert.equal(count('volunteers'), volunteersBefore, 'volunteers stay');
 assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 0, resetEnabled: true }, 'so do the settings');
-assert.deepEqual(await ok<Person[]>(vera, 'GET', '/api/people'), []);
+assert.deepEqual(await everyone(), []);
 const afterReset = await ok<AdminStats>(admin, 'GET', '/api/admin/stats');
 assert.deepEqual([afterReset.totals.unassigned, afterReset.totals.cured, afterReset.lastUpload], [0, 0, null]);
 const resetLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=5'))[0];

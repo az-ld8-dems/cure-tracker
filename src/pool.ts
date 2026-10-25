@@ -1,5 +1,5 @@
 // "Find people": everyone who still needs curing and has nobody yet. Filter by city, precinct or party, sort, and claim.
-import type { Person, Volunteer } from './api.d.ts';
+import type { PeoplePage, Person, Volunteer } from './api.d.ts';
 import {
   $,
   api,
@@ -25,15 +25,15 @@ const app = $('#app');
 // People shown at first, and added by each press of "Show more".
 const PAGE = 30;
 
-type Sort = 'days' | 'precinct' | 'city' | 'name';
-
 if (me) {
+  // The people loaded so far, how many the filters match in all, and how many are in the pool.
   let people: Person[] = [];
+  let total = 0;
+  let open = 0;
   let volunteers = new Map<number, Volunteer>();
-  let shown = PAGE;
 
   const search = h('input', { class: 'fl-input', id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
-  const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reset() });
+  const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reload() });
   // Precincts are a long list, so this is a type-to-filter combobox rather than a select. Empty means all precincts.
   const precinct = h('input', {
     class: 'fl-input',
@@ -42,10 +42,10 @@ if (me) {
     placeholder: 'All precincts',
     oninput: () => reset(),
   });
-  const party = h('select', { class: 'fl-select', id: 'party', onchange: () => reset() });
+  const party = h('select', { class: 'fl-select', id: 'party', onchange: () => reload() });
   const sort = h(
     'select',
-    { class: 'fl-select', id: 'sort', onchange: () => reset() },
+    { class: 'fl-select', id: 'sort', onchange: () => reload() },
     h('option', { value: 'days' }, 'Longest uncured first'),
     h('option', { value: 'precinct' }, 'Precinct'),
     h('option', { value: 'city' }, 'City'),
@@ -55,56 +55,62 @@ if (me) {
   const list = h('ul', { class: 'fl-grid people' });
   const more = h('div', { class: 'fl-cluster' });
 
-  const pool = (): Person[] => people.filter((p) => p.assignedTo === null && p.status !== 'cured');
-
   function fill(select: HTMLSelectElement, all: string, values: string[], label: (v: string) => string = titleCase): void {
     const previous = select.value;
-    clear(
-      select,
-      h('option', { value: '' }, all),
-      ...[...new Set(values)]
-        .filter((v) => v !== '')
-        .sort()
-        .map((v) => h('option', { value: v }, label(v))),
-    );
+    clear(select, h('option', { value: '' }, all), ...values.map((v) => h('option', { value: v }, label(v))));
     select.value = previous;
   }
 
-  function reset(): void {
-    shown = PAGE;
-    render();
+  // The server filters, sorts and pages; the page asks again when a filter changes. A slow answer to an older question is dropped.
+  let asked = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  function question(offset: number): string {
+    const params = new URLSearchParams({ scope: 'pool', sort: sort.value, limit: String(PAGE), offset: String(offset) });
+    for (const [name, value] of [
+      ['q', search.value.trim()],
+      ['city', city.value],
+      ['precinct', precinct.value.trim()],
+      ['party', party.value],
+    ] as const) {
+      if (value !== '') params.set(name, value);
+    }
+    return `/api/people?${params}`;
   }
 
-  function visible(): Person[] {
-    const needle = search.value.trim().toLowerCase();
-    const precinctNeedle = precinct.value.trim().toLowerCase();
-    const matches = pool().filter(
-      (p) =>
-        (city.value === '' || p.city === city.value) &&
-        (precinctNeedle === '' || p.precinct.toLowerCase().includes(precinctNeedle)) &&
-        (party.value === '' || p.party === party.value) &&
-        (needle === '' || `${p.firstName} ${p.lastName} ${p.address}`.toLowerCase().includes(needle)),
-    );
-    const by: Record<Sort, (a: Person, b: Person) => number> = {
-      days: (a, b) => (b.daysUncured ?? -1) - (a.daysUncured ?? -1),
-      precinct: (a, b) => a.precinct.localeCompare(b.precinct) || (b.daysUncured ?? -1) - (a.daysUncured ?? -1),
-      city: (a, b) => a.city.localeCompare(b.city) || (b.daysUncured ?? -1) - (a.daysUncured ?? -1),
-      name: (a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName),
-    };
-    return matches.sort(by[sort.value as Sort] ?? by.days);
+  async function reload(): Promise<void> {
+    const mine = ++asked;
+    try {
+      const page = await api<PeoplePage>('GET', question(0));
+      if (mine !== asked) return;
+      people = page.people;
+      total = page.total;
+      open = page.open ?? page.total;
+      render();
+    } catch (e) {
+      if (mine === asked) toast(failureText(e), 'error');
+    }
+  }
+
+  // Typing waits for a pause; the selects change at once.
+  function reset(): void {
+    clearTimeout(timer);
+    timer = setTimeout(reload, 250);
   }
 
   async function claim(p: Person): Promise<void> {
     try {
       await api<Person>('POST', `/api/people/${p.id}/claim`, {});
-      people = people.map((x) => (x.id === p.id ? { ...x, assignedTo: me?.id ?? null } : x));
+      people = people.filter((x) => x.id !== p.id);
+      total = Math.max(0, total - 1);
+      open = Math.max(0, open - 1);
       toast(`${personName(p)} is on your list now.`);
+      render();
     } catch (e) {
       toast(failureText(e), 'error');
       // Somebody else was faster: show the pool as it is now.
-      people = await api<Person[]>('GET', '/api/people');
+      await reload();
     }
-    render();
   }
 
   function card(p: Person): HTMLElement {
@@ -118,32 +124,39 @@ if (me) {
     );
   }
 
-  function showMore(): void {
-    shown += PAGE;
-    render();
+  async function showMore(): Promise<void> {
+    const mine = asked;
+    try {
+      const page = await api<PeoplePage>('GET', question(people.length));
+      if (mine !== asked) return;
+      // Somebody may have claimed people since the last page, so skip anyone already shown.
+      const have = new Set(people.map((p) => p.id));
+      people = [...people, ...page.people.filter((p) => !have.has(p.id))];
+      total = page.total;
+      render();
+    } catch (e) {
+      toast(failureText(e), 'error');
+    }
   }
 
   function render(): void {
-    const matches = visible();
-    const total = pool().length;
-    const page = matches.slice(0, shown);
     count.textContent =
-      total === 0
+      open === 0
         ? 'Nobody is waiting for a volunteer right now.'
-        : `Showing ${page.length} of ${plural(matches.length, 'person', 'people')}${matches.length === total ? '' : ` (${total} in all)`}.`;
-    clear(list, ...page.map(card));
-    clear(more, matches.length > shown ? h('button', { class: 'fl-btn', type: 'button', onclick: showMore }, 'Show more') : null);
+        : `Showing ${people.length} of ${plural(total, 'person', 'people')}${total === open ? '' : ` (${open} in all)`}.`;
+    clear(list, ...people.map(card));
+    clear(more, total > people.length ? h('button', { class: 'fl-btn', type: 'button', onclick: showMore }, 'Show more') : null);
   }
 
   try {
-    [people, volunteers] = await Promise.all([api<Person[]>('GET', '/api/people'), loadVolunteers()]);
-    const open = pool();
-    fill(
-      city,
-      'All cities',
-      open.map((p) => p.city),
-    );
-    const precincts = [...new Set(open.map((p) => p.precinct))].filter((v) => v !== '').sort();
+    const [first, vols] = await Promise.all([api<PeoplePage>('GET', `${question(0)}&facets=1`), loadVolunteers()]);
+    volunteers = vols;
+    people = first.people;
+    total = first.total;
+    open = first.open ?? first.total;
+    const facets = first.facets ?? { cities: [], parties: [], precincts: [] };
+    fill(city, 'All cities', facets.cities);
+    const precincts = facets.precincts;
     window.Frostline.combobox(precinct, {
       mode: 'suggest',
       label: 'Precincts',
@@ -153,12 +166,7 @@ if (me) {
         return precincts.filter((v) => v.toLowerCase().includes(q)).map((v) => ({ id: v, label: v }));
       },
     });
-    fill(
-      party,
-      'All parties',
-      open.map((p) => p.party),
-      (v) => v,
-    );
+    fill(party, 'All parties', facets.parties, (v) => v);
     clear(
       app,
       h(

@@ -1,5 +1,5 @@
 // "My people": the voters this volunteer has claimed, with the buttons for what happened and a place for notes.
-import type { ContactMethod, Person, PersonDetail, Status, Volunteer } from './api.d.ts';
+import type { ContactMethod, PeoplePage, Person, PersonDetail, Status, Volunteer } from './api.d.ts';
 import {
   $,
   api,
@@ -244,7 +244,9 @@ if (me) {
   }
 
   try {
-    [people, volunteers] = await Promise.all([api<Person[]>('GET', '/api/people'), loadVolunteers()]);
+    const [page, vols] = await Promise.all([api<PeoplePage>('GET', '/api/people?scope=mine'), loadVolunteers()]);
+    people = page.people;
+    volunteers = vols;
     clear(app, summary, listBox, curedBox);
     renderList();
   } catch (e) {
