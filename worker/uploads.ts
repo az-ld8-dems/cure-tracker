@@ -6,7 +6,7 @@
 // same answer. Only erasable TypeScript.
 import type { ColumnPick, MergePair, PossibleMatch, StageStart, StageStarted, UploadPreview, UploadRecord } from '../src/api.d.ts';
 import type { IncomingPerson } from '../src/sheet.ts';
-import { FIELDS } from '../src/sheet.ts';
+import { FIELDS, KEY_VERSION } from '../src/sheet.ts';
 import type { Db, Stmt } from './db.ts';
 
 // People the Worker takes in one request. The Worker's CPU for a request is a JSON parse of this many rows and one statement, so it
@@ -124,6 +124,17 @@ async function readStage(db: Db, token: string): Promise<StageRow> {
 
 // Starts taking in a sheet. Whatever an earlier upload left behind is dropped.
 export async function startStage(db: Db, actor: string, now: string, start: StageStart): Promise<StageStarted> {
+  // A page from before the keys changed would send keys this Worker does not use.
+  if (start.keyVersion !== KEY_VERSION) throw new StageError('This page is out of date. Reload it, then choose the file again.');
+  // The people already here were keyed the way the last upload keyed them. If that differs from now, everyone would look new.
+  const savedVersion = await db.prepare("SELECT value FROM settings WHERE key = 'key_version'").first<{ value: string }>();
+  const anyone = await db.prepare('SELECT 1 AS n FROM people LIMIT 1').first<{ n: number }>();
+  const warnings = [...start.warnings];
+  if (anyone && Number(savedVersion?.value ?? 1) !== KEY_VERSION) {
+    warnings.unshift(
+      'The way people are matched changed since the last upload, so everyone already here would look new and everyone on this sheet would be added again. Use Start over (bottom of this page) first, unless you mean it.',
+    );
+  }
   const token = crypto.randomUUID();
   await db.batch([
     db.prepare('DELETE FROM upload_rows'),
@@ -144,7 +155,7 @@ export async function startStage(db: Db, actor: string, now: string, start: Stag
         start.skippedOtherDistrict,
         start.skippedInvalid,
         start.duplicates,
-        JSON.stringify(start.warnings),
+        JSON.stringify(warnings),
         JSON.stringify(start.cities),
         JSON.stringify(start.columns),
         JSON.stringify(start.used),
@@ -504,6 +515,9 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
          'precincts', json((SELECT json_group_array(precinct) FROM (SELECT DISTINCT precinct FROM upload_rows WHERE precinct != '' ORDER BY precinct)))))
        ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
     ),
+    db
+      .prepare("INSERT INTO settings (key, value) VALUES ('key_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+      .bind(String(KEY_VERSION)),
     // The columns this upload read are what the next one starts from.
     db
       .prepare("INSERT INTO settings (key, value) VALUES ('column_map', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")

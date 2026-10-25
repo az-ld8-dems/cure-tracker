@@ -2,7 +2,7 @@
 // what, claims that cannot collide, the upload lifecycle (cured, still uncured, reappeared), the admin tools and the audit log.
 import assert from 'node:assert/strict';
 import type { AdminSettings, AdminStats, AuditEntry, Me, PeoplePage, Person, PersonDetail, ResetResult, Volunteer } from '../src/api.d.ts';
-import { describeColumns, ImportError } from '../src/sheet.ts';
+import { describeColumns, ImportError, KEY_VERSION } from '../src/sheet.ts';
 import type { AccessVerifier } from '../worker/access.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { type SheetPerson, sheetCsv, syntheticPeople } from './lib/sheet.ts';
@@ -177,6 +177,7 @@ assert.equal((await everyone()).length, 0, 'none of that wrote anyone');
 // --- the Worker checks what the browser sends
 const goodStart = {
   filename: 'x.csv',
+  keyVersion: KEY_VERSION,
   expected: 1,
   rows: 1,
   skippedOtherDistrict: 0,
@@ -188,6 +189,7 @@ const goodStart = {
   used: {},
 };
 for (const bad of [
+  { keyVersion: 'two' },
   { expected: 0 },
   { expected: 'many' },
   { warnings: 'no' },

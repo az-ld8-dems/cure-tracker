@@ -2,6 +2,7 @@
 // database answers the common ones from an index. Synthetic data on the real migrations, as in test-api.ts.
 import assert from 'node:assert/strict';
 import type { PeoplePage } from '../src/api.d.ts';
+import { KEY_VERSION } from '../src/sheet.ts';
 import { finishSheet, mergeAndPlan } from '../src/upload.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { sheetCsv, syntheticPeople } from './lib/sheet.ts';
@@ -277,5 +278,57 @@ const mergedLog = sqlite.prepare("SELECT person_id, detail FROM audit WHERE acti
 assert.equal(Number(mergedLog?.person_id), subject.id);
 assert.equal(JSON.parse(String(mergedLog?.detail)).was.name.toLowerCase(), `${subject.firstName} ${subject.lastName}`.toLowerCase());
 assert.equal(Number(sqlite.prepare('SELECT COUNT(*) AS n FROM upload_merges').get()?.n), 0, 'the marks are cleared');
+
+// --- the same person, written two ways in two dumps, is the same person
+const unitSheet = (address: string) => sheetCsv([{ first: 'Una', last: 'Unit', address, precinct: 'ARCADIA' }]);
+await uploadCsv(sendAs(admin), unitSheet('1 E MAIN ST APT 2129 TEMPE, AZ 85281'), { filename: 'u1.csv', force: true });
+const apt = sqlite.prepare("SELECT id FROM people WHERE last_name = 'Unit'").get();
+const again2 = await uploadCsv(sendAs(admin), unitSheet('1 East Main Street 2129 Tempe, AZ 85281-0001'), {
+  filename: 'u2.csv',
+  force: true,
+});
+assert.deepEqual(
+  [again2.added, again2.cured, again2.updated],
+  [0, 0, 1],
+  'the unit word, the spelled-out street and the ZIP+4 make no new person',
+);
+assert.equal(Number(sqlite.prepare("SELECT id FROM people WHERE last_name = 'Unit'").get()?.id), Number(apt?.id), 'the same record');
+
+// --- the way people are matched is versioned: after it changes, the page says so before everyone looks new
+assert.equal(
+  sqlite.prepare("SELECT value FROM settings WHERE key = 'key_version'").get()?.value,
+  String(KEY_VERSION),
+  'an upload records it',
+);
+const quiet = await previewCsv(sendAs(admin), unitSheet('1 E MAIN ST 2129'));
+assert.equal(
+  quiet.warnings.some((w) => /way people are matched/.test(w)),
+  false,
+);
+sqlite.prepare("UPDATE settings SET value = '1' WHERE key = 'key_version'").run();
+const loud = await previewCsv(sendAs(admin), unitSheet('1 E MAIN ST 2129'));
+assert.match(loud.warnings[0] ?? '', /way people are matched changed/, 'the old keys are not the new keys');
+const stale = await call(admin, 'POST', '/api/admin/uploads/stage', {
+  filename: 'x',
+  keyVersion: KEY_VERSION - 1,
+  expected: 1,
+  rows: 1,
+  skippedOtherDistrict: 0,
+  skippedInvalid: 0,
+  duplicates: 0,
+  warnings: [],
+  cities: [],
+  columns: loud.columns,
+  used: {},
+});
+assert.equal(stale.status, 409, `a page from before the change is told to reload: ${JSON.stringify(stale.data)}`);
+sqlite.exec('DELETE FROM notes');
+sqlite.exec('DELETE FROM people');
+const empty = await previewCsv(sendAs(admin), unitSheet('1 E MAIN ST 2129'));
+assert.equal(
+  empty.warnings.some((w) => /way people are matched/.test(w)),
+  false,
+  'with nobody here there is nothing to mismatch',
+);
 
 console.log('test-people: ok');

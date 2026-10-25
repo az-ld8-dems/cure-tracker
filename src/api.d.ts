@@ -174,6 +174,8 @@ export type ColumnPick = Partial<Record<ColumnField, string | null>>;
 // many people will follow.
 export interface StageStart {
   filename: string;
+  // KEY_VERSION in src/sheet.ts: how the keys of these people were made.
+  keyVersion: number;
   expected: number;
   rows: number;
   skippedOtherDistrict: number;
