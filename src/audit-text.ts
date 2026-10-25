@@ -31,6 +31,8 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
       return `moved ${count(d.count, 'person', 'people')} from ${volunteer(d.from)} to ${volunteer(d.to)}`;
     case 'flag.dismiss':
       return 'dismissed the flag';
+    case 'geocode':
+      return `looked up ${count(d.sent, 'address', 'addresses')} with the Census geocoder: ${String(d.matched)} placed, ${String(d.noMatch)} not`;
     case 'import.cured':
       return 'cured: no longer on the state’s sheet';
     case 'import.still_uncured':

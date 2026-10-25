@@ -23,6 +23,7 @@ import type {
 import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
+import { censusLine, GeocodeError, geocodeChunk, waitingForGeocode } from './geocode.ts';
 import {
   finishStage,
   graceCycles,
@@ -48,6 +49,7 @@ export interface ApiContext {
   // Whether this deployment lets admins reset (ALLOW_RESET).
   allowReset: boolean;
   now: () => Date;
+  fetcher: typeof fetch;
 }
 
 interface Ctx {
@@ -57,6 +59,7 @@ interface Ctx {
   allowReset: boolean;
   now: string;
   today: string;
+  fetcher: typeof fetch;
 }
 
 type Body = Record<string, unknown>;
@@ -438,10 +441,23 @@ async function adminStats(c: Ctx): Promise<Response> {
       `SELECT COALESCE(SUM(status = 'needs_contact'), 0) AS needs, COALESCE(SUM(status = 'left_voicemail'), 0) AS voicemail,
          COALESCE(SUM(status = 'contacted'), 0) AS contacted, COALESCE(SUM(status = 'cured'), 0) AS cured,
          COALESCE(SUM(status != 'cured' AND assigned_to IS NULL), 0) AS unassigned,
-         COALESCE(SUM(status != 'cured' AND flag IS NOT NULL), 0) AS flagged
+         COALESCE(SUM(status != 'cured' AND flag IS NOT NULL), 0) AS flagged,
+         COALESCE(SUM(status != 'cured' AND geocode IS NULL), 0) AS waiting, COALESCE(SUM(geocode = 'match'), 0) AS located,
+         COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated
        FROM people`,
     )
-    .first<{ needs: number; voicemail: number; contacted: number; cured: number; unassigned: number; flagged: number }>();
+    .first<{
+      needs: number;
+      voicemail: number;
+      contacted: number;
+      cured: number;
+      unassigned: number;
+      flagged: number;
+      waiting: number;
+      located: number;
+      unlocated: number;
+    }>();
+  const sample = (await waitingForGeocode(c.db, 0, 3)).map(censusLine);
   const volunteers = await c.db
     .prepare(
       `SELECT v.id, v.email, v.name, v.last_seen_at,
@@ -499,6 +515,7 @@ async function adminStats(c: Ctx): Promise<Response> {
     ),
     flagged: flagged.results.map((r) => toPerson(r, c.today)),
     lastUpload: last ? uploadRecord(last) : null,
+    geocode: { waiting: totals?.waiting ?? 0, matched: totals?.located ?? 0, unmatched: totals?.unlocated ?? 0, sample },
   };
   return json(stats);
 }
@@ -651,6 +668,18 @@ async function staged<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+// Looks up the next few hundred people who are waiting, after `after`, at the Census geocoder, and stores what it says.
+async function geocode(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  const after = body.after === undefined ? 0 : body.after;
+  if (typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0) throw new HttpError(400, 'after must be a person id or 0');
+  try {
+    return json(await geocodeChunk(c.db, c.me.email, c.now, after, c.fetcher));
+  } catch (e) {
+    if (e instanceof GeocodeError) throw new HttpError(502, e.message);
+    throw e;
+  }
+}
+
 async function uploadColumns(c: Ctx): Promise<Response> {
   return json(await savedColumns(c.db));
 }
@@ -799,6 +828,7 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/settings$/, admin: true, handler: getSettings },
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, admin: true, handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/reset$/, admin: true, handler: reset },
+  { method: 'POST', pattern: /^\/api\/admin\/geocode$/, admin: true, handler: geocode },
   { method: 'GET', pattern: /^\/api\/admin\/uploads\/columns$/, admin: true, handler: uploadColumns },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage$/, admin: true, handler: uploadStage },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/rows$/, admin: true, handler: uploadRows },
@@ -855,7 +885,15 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
     const now = api.now();
     const iso = now.toISOString();
     const me = await ensureVolunteer(api.db, api.email, iso);
-    const ctx: Ctx = { db: api.db, me, isAdmin: api.isAdmin, allowReset: api.allowReset, now: iso, today: arizonaDate(now) };
+    const ctx: Ctx = {
+      db: api.db,
+      me,
+      isAdmin: api.isAdmin,
+      allowReset: api.allowReset,
+      now: iso,
+      today: arizonaDate(now),
+      fetcher: api.fetcher,
+    };
     const m = route.pattern.exec(url.pathname);
     return await route.handler(ctx, m?.slice(1) ?? [], body, url);
   } catch (e) {

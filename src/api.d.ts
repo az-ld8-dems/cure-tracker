@@ -118,6 +118,18 @@ export interface AdminStats {
   volunteers: VolunteerStats[];
   flagged: Person[];
   lastUpload: UploadRecord | null;
+  // Where people live: open people not looked up yet, people placed on the map, and people the geocoder could not place. `sample` is
+  // what a request to the geocoder looks like for the next few people waiting: an id and an address, nothing else.
+  geocode: { waiting: number; matched: number; unmatched: number; sample: string[] };
+}
+
+// What one geocoding request did. `next` is where to go on from (the id to pass as `after`), null when no one is left.
+export interface GeocodeProgress {
+  sent: number;
+  matched: number;
+  noMatch: number;
+  unanswered: number;
+  next: number | null;
 }
 
 export interface PossibleMatch {
