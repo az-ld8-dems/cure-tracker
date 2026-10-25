@@ -177,6 +177,9 @@ try {
   await page.getByRole('button', { name: 'Person' }).click();
   await page.locator('th[aria-sort="ascending"]').waitFor();
   expect('find people', (await page.getByLabel('Sort by').inputValue()) === 'name', 'the Sort by select did not follow the header');
+  // A second click on the same header runs it the other way.
+  await page.getByRole('button', { name: 'Person' }).click();
+  await page.locator('th[aria-sort="descending"]').waitFor();
   await check(page, 'find people (table)');
 
   // the admin pages are closed to a volunteer (this page's own 403 is the point)

@@ -45,7 +45,14 @@ if (me) {
   const party = h('select', { class: 'fl-select', id: 'party', onchange: () => reload() });
   const sort = h(
     'select',
-    { class: 'fl-select', id: 'sort', onchange: () => reload() },
+    {
+      class: 'fl-select',
+      id: 'sort',
+      onchange: () => {
+        reversed = false;
+        reload();
+      },
+    },
     h('option', { value: 'days' }, 'Longest uncured first'),
     h('option', { value: 'precinct' }, 'Precinct'),
     h('option', { value: 'city' }, 'City'),
@@ -74,9 +81,11 @@ if (me) {
   const count = h('p', { class: 'fl-note', role: 'status' });
   // Two views of the same page: a table where there is room, and compact rows on a phone. CSS shows one of them (.pool-table, .pool-rows).
   const tbody = h('tbody');
-  // Three headers sort the table: a click asks for that sort, and the active one says which way it runs (aria-sort). The "Sort by"
-  // select does the same on a phone and stays in step.
+  // Three headers sort the table: a click asks for that sort, a second click runs it the other way, and the active one says which way it
+  // runs (aria-sort). The "Sort by" select does the same on a phone and stays in step, except that it only picks the natural direction.
+  let reversed = false;
   const sortHeads = new Map<string, { th: HTMLElement; direction: 'ascending' | 'descending' }>();
+  // `direction` is the way the column reads in its natural order (days uncured, longest first, reads as descending).
   function head(label: string, by?: string, direction: 'ascending' | 'descending' = 'ascending'): HTMLElement {
     if (by === undefined) return h('th', { scope: 'col' }, label);
     const th = h(
@@ -88,6 +97,7 @@ if (me) {
           class: 'pool-sort',
           type: 'button',
           onclick: () => {
+            reversed = sort.value === by ? !reversed : false;
             sort.value = by;
             reload();
           },
@@ -138,6 +148,7 @@ if (me) {
 
   function question(offset: number): string {
     const params = new URLSearchParams({ scope: 'pool', sort: sort.value, limit: String(PAGE), offset: String(offset) });
+    if (reversed) params.set('dir', 'desc');
     for (const [name, value] of [
       ['q', search.value.trim()],
       ['city', city.value],
@@ -149,11 +160,16 @@ if (me) {
     return `/api/people?${params}`;
   }
 
-  async function reload(): Promise<void> {
+  function showSort(): void {
     for (const [by, { th, direction }] of sortHeads) {
-      if (by === sort.value) th.setAttribute('aria-sort', direction);
-      else th.removeAttribute('aria-sort');
+      if (by !== sort.value) th.removeAttribute('aria-sort');
+      else if (!reversed) th.setAttribute('aria-sort', direction);
+      else th.setAttribute('aria-sort', direction === 'ascending' ? 'descending' : 'ascending');
     }
+  }
+
+  async function reload(): Promise<void> {
+    showSort();
     const mine = ++asked;
     try {
       const page = await api<PeoplePage>('GET', question(0));
@@ -260,7 +276,7 @@ if (me) {
   }
 
   try {
-    sortHeads.get(sort.value)?.th.setAttribute('aria-sort', sortHeads.get(sort.value)?.direction ?? 'ascending');
+    showSort();
     const first = await api<PeoplePage>('GET', `${question(0)}&facets=1`);
     people = first.people;
     total = first.total;

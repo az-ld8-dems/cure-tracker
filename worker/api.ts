@@ -187,13 +187,15 @@ async function listVolunteers(c: Ctx): Promise<Response> {
 
 // The pool: open people nobody has claimed. The partial index people_pool covers exactly this condition, so keep it word for word.
 const POOL_WHERE = "p.assigned_to IS NULL AND p.status != 'cured'";
-// Longest uncured first is the earliest status date first, people with no date last. The expression is the one people_pool indexes.
-const DAYS_ORDER = "COALESCE(p.status_date, '9999-12-31'), p.id";
+// Longest uncured first is the earliest status date first, people with no date last. The first term is the expression people_pool indexes.
+const DAYS_ORDER = ["COALESCE(p.status_date, '9999-12-31')", 'p.id'];
+// Each sort as the terms of its ORDER BY, in its natural direction. dir=desc puts DESC on every term, which is the exact reverse (and
+// lets SQLite read an index backwards).
 const PEOPLE_SORTS = new Map([
   ['days', DAYS_ORDER],
-  ['precinct', `p.precinct COLLATE NOCASE, ${DAYS_ORDER}`],
-  ['city', `p.city COLLATE NOCASE, ${DAYS_ORDER}`],
-  ['name', 'p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE, p.id'],
+  ['precinct', ['p.precinct COLLATE NOCASE', ...DAYS_ORDER]],
+  ['city', ['p.city COLLATE NOCASE', ...DAYS_ORDER]],
+  ['name', ['p.last_name COLLATE NOCASE', 'p.first_name COLLATE NOCASE', 'p.id']],
 ]);
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
@@ -219,13 +221,16 @@ function filterParam(url: URL, name: string): string {
 }
 
 // People, a page at a time. scope=pool (the default) is who still needs a volunteer, scope=mine is the caller's own people, and
-// scope=all (admins) is everyone. city and party match exactly; precinct, and q (name, street and, for admins, phone) match any part.
+// scope=all (admins) is everyone. sort (days, precinct, city or name) runs the other way with dir=desc. city and party match exactly; precinct, and q (name, street and, for admins, phone) match any part.
 async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Promise<Response> {
   const scope = url.searchParams.get('scope') ?? 'pool';
   if (scope !== 'pool' && scope !== 'mine' && scope !== 'all') throw new HttpError(400, 'scope must be pool, mine or all');
   if (scope === 'all' && !c.isAdmin) throw new HttpError(403, 'Forbidden');
-  const order = PEOPLE_SORTS.get(url.searchParams.get('sort') ?? 'days');
-  if (order === undefined) throw new HttpError(400, `sort must be one of ${[...PEOPLE_SORTS.keys()].join(', ')}`);
+  const terms = PEOPLE_SORTS.get(url.searchParams.get('sort') ?? 'days');
+  if (terms === undefined) throw new HttpError(400, `sort must be one of ${[...PEOPLE_SORTS.keys()].join(', ')}`);
+  const dir = url.searchParams.get('dir') ?? 'asc';
+  if (dir !== 'asc' && dir !== 'desc') throw new HttpError(400, 'dir must be asc or desc');
+  const order = terms.map((t) => (dir === 'desc' ? `${t} DESC` : t)).join(', ');
   const limit = intParam(url, 'limit', scope === 'mine' ? MAX_MINE : DEFAULT_PAGE, 1, scope === 'mine' ? MAX_MINE : MAX_PAGE);
   const offset = intParam(url, 'offset', 0, 0, 1_000_000);
 
