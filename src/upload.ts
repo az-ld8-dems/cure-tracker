@@ -2,7 +2,7 @@
 // free Worker has about 10 ms of CPU a request and could not read a large file. The admin page uses this, and so do the tests, with their
 // own way of making a request. Free of browser globals.
 import type { ColumnPick, MergePair, StageStart, StageStarted, UploadPreview } from './api.d.ts';
-import { readSheet } from './sheet.ts';
+import { KEY_VERSION, readSheet } from './sheet.ts';
 
 export type Request = <T>(method: 'GET' | 'POST', path: string, body?: unknown) => Promise<T>;
 
@@ -32,6 +32,7 @@ export async function stageSheet(text: string, filename: string, request: Reques
   for (const c of sheet.columns.choices) if (c.header !== null) used[c.field] = c.header;
   const start: StageStart = {
     filename,
+    keyVersion: KEY_VERSION,
     expected: sheet.people.length,
     rows: sheet.rows,
     skippedOtherDistrict: sheet.skippedOtherDistrict,

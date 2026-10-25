@@ -576,6 +576,7 @@ function stageStartOf(body: Body): StageStart {
   if (expected < 1) throw new HttpError(400, 'expected must be at least 1');
   return {
     filename: text(body, 'filename', 200, false),
+    keyVersion: count(body, 'keyVersion', 1000),
     expected,
     rows: count(body, 'rows', 1_000_000),
     skippedOtherDistrict: count(body, 'skippedOtherDistrict', 1_000_000),
@@ -655,7 +656,8 @@ async function uploadColumns(c: Ctx): Promise<Response> {
 }
 
 async function uploadStage(c: Ctx, _p: string[], body: Body): Promise<Response> {
-  return json(await startStage(c.db, c.me.email, c.now, stageStartOf(body)), 201);
+  const start = stageStartOf(body);
+  return json(await staged(() => startStage(c.db, c.me.email, c.now, start)), 201);
 }
 
 async function uploadRows(c: Ctx, _p: string[], body: Body): Promise<Response> {

@@ -2,7 +2,7 @@
 // SQL (worker/uploads.ts), so it never loads everyone into the Worker; tools/test-upload-sql.ts runs both on the same random data and
 // requires the same answer. Only tests import this file. Only erasable TypeScript syntax.
 import type { Flag, PossibleMatch, Status } from '../../src/api.d.ts';
-import { clean, type IncomingPerson } from '../../src/sheet.ts';
+import { addressKey, type IncomingPerson, nameKey } from '../../src/sheet.ts';
 
 export interface ExistingPerson {
   id: number;
@@ -135,9 +135,9 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
   const goneByName = new Map<string, ExistingPerson[]>();
   const goneByFirstAddress = new Map<string, ExistingPerson[]>();
   for (const g of gone) {
-    const a = `${clean(g.lastName)}|${clean(g.address)}`;
-    const n = `${clean(g.firstName)}|${clean(g.lastName)}`;
-    const f = `${clean(g.firstName)}|${clean(g.address)}`;
+    const a = `${nameKey(g.lastName)}|${addressKey(g.address)}`;
+    const n = `${nameKey(g.firstName)}|${nameKey(g.lastName)}`;
+    const f = `${nameKey(g.firstName)}|${addressKey(g.address)}`;
     goneByAddress.set(a, [...(goneByAddress.get(a) ?? []), g]);
     goneByName.set(n, [...(goneByName.get(n) ?? []), g]);
     goneByFirstAddress.set(f, [...(goneByFirstAddress.get(f) ?? []), g]);
@@ -145,7 +145,7 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
   const possibleMatches: PossibleMatch[] = [];
   for (const p of inserts) {
     const incomingName = `${p.firstName} ${p.lastName}`;
-    for (const g of goneByAddress.get(`${clean(p.lastName)}|${clean(p.address)}`) ?? []) {
+    for (const g of goneByAddress.get(`${nameKey(p.lastName)}|${addressKey(p.address)}`) ?? []) {
       possibleMatches.push({
         kind: 'address',
         existing: { id: g.id, name: `${g.firstName} ${g.lastName}`, address: g.address },
@@ -153,7 +153,7 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
         merged: false,
       });
     }
-    for (const g of goneByFirstAddress.get(`${clean(p.firstName)}|${clean(p.address)}`) ?? []) {
+    for (const g of goneByFirstAddress.get(`${nameKey(p.firstName)}|${addressKey(p.address)}`) ?? []) {
       possibleMatches.push({
         kind: 'surname',
         existing: { id: g.id, name: `${g.firstName} ${g.lastName}`, address: g.address },
@@ -161,7 +161,7 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
         merged: false,
       });
     }
-    for (const g of goneByName.get(`${clean(p.firstName)}|${clean(p.lastName)}`) ?? []) {
+    for (const g of goneByName.get(`${nameKey(p.firstName)}|${nameKey(p.lastName)}`) ?? []) {
       possibleMatches.push({
         kind: 'moved',
         existing: { id: g.id, name: `${g.firstName} ${g.lastName}`, address: g.address },
