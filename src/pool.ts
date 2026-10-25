@@ -34,7 +34,14 @@ if (me) {
 
   const search = h('input', { class: 'fl-input', id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
   const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reset() });
-  const precinct = h('select', { class: 'fl-select', id: 'precinct', onchange: () => reset() });
+  // Precincts are a long list, so this is a type-to-filter combobox rather than a select. Empty means all precincts.
+  const precinct = h('input', {
+    class: 'fl-input',
+    id: 'precinct',
+    type: 'text',
+    placeholder: 'All precincts',
+    oninput: () => reset(),
+  });
   const party = h('select', { class: 'fl-select', id: 'party', onchange: () => reset() });
   const sort = h(
     'select',
@@ -70,10 +77,11 @@ if (me) {
 
   function visible(): Person[] {
     const needle = search.value.trim().toLowerCase();
+    const precinctNeedle = precinct.value.trim().toLowerCase();
     const matches = pool().filter(
       (p) =>
         (city.value === '' || p.city === city.value) &&
-        (precinct.value === '' || p.precinct === precinct.value) &&
+        (precinctNeedle === '' || p.precinct.toLowerCase().includes(precinctNeedle)) &&
         (party.value === '' || p.party === party.value) &&
         (needle === '' || `${p.firstName} ${p.lastName} ${p.address}`.toLowerCase().includes(needle)),
     );
@@ -135,12 +143,16 @@ if (me) {
       'All cities',
       open.map((p) => p.city),
     );
-    fill(
-      precinct,
-      'All precincts',
-      open.map((p) => p.precinct),
-      (v) => v,
-    );
+    const precincts = [...new Set(open.map((p) => p.precinct))].filter((v) => v !== '').sort();
+    window.Frostline.combobox(precinct, {
+      mode: 'suggest',
+      label: 'Precincts',
+      openOnFocus: true,
+      options: (query) => {
+        const q = query.trim().toLowerCase();
+        return precincts.filter((v) => v.toLowerCase().includes(q)).map((v) => ({ id: v, label: v }));
+      },
+    });
     fill(
       party,
       'All parties',
