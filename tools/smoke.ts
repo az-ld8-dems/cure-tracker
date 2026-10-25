@@ -9,6 +9,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { type Browser, type BrowserContext, chromium, firefox, type Page, webkit } from 'playwright';
 import { DEV_ADMIN, startDevServer } from './lib/dev-server.ts';
 import { sheetCsv, syntheticPeople } from './lib/sheet.ts';
+import { webkitQuirks } from './lib/webkit-quirks.ts';
 
 // Every page links the vendored Frostline's versioned folder: the version in the HTML must be the one that is built.
 const frostline = readFileSync(new URL('../vendor/frostline/VERSION', import.meta.url), 'utf8').trim();
@@ -33,6 +34,9 @@ const PEOPLE = 40;
 const { server, port, sqlite } = await startDevServer({ people: PEOPLE });
 const base = `http://localhost:${port}`;
 const problems: string[] = [];
+// Known WebKit-only console messages that were ignored, by label (tools/lib/webkit-quirks.ts); listed at the end.
+const quirks = name === 'webkit' ? webkitQuirks : [];
+const ignored = new Map<string, number>();
 const problem = (where: string, what: string) => problems.push(`${where}: ${what}`);
 
 const browser: Browser = await launcher.launch();
@@ -51,6 +55,11 @@ async function context(email: string, opts: { dark?: boolean; phone?: boolean } 
 // `allowed` are response statuses this page is expected to get (a refused claim is a 409), so they are not problems.
 function watch(page: Page, where: string, allowed: number[] = []): void {
   page.on('console', (m) => {
+    const quirk = quirks.find((q) => q.re.test(m.text()));
+    if (quirk) {
+      ignored.set(quirk.label, (ignored.get(quirk.label) ?? 0) + 1);
+      return;
+    }
     const expected = allowed.some((status) => m.text().includes(`status of ${status}`));
     if ((m.type() === 'error' || m.type() === 'warning') && !expected) problem(where, `console ${m.type()}: ${m.text()}`);
   });
@@ -305,6 +314,7 @@ try {
   server.close();
 }
 
+for (const [label, n] of ignored) console.log(`ignored ${n}x (WebKit quirk): ${label}`);
 if (problems.length) {
   console.log(`PROBLEMS:\n${[...new Set(problems)].join('\n')}`);
   process.exit(1);
