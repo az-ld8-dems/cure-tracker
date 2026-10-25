@@ -134,9 +134,7 @@ try {
   await pageB.getByLabel('Your name').fill('Walt Webb');
   await pageB.getByRole('button', { name: 'Continue' }).click();
   await pageB.getByText(/Showing 30 of 39 people/).waitFor();
-  const stale = await pageB.evaluate(
-    async () => (await (await fetch('/api/people')).json()).find((p: { assignedTo: number | null }) => p.assignedTo !== null).id,
-  );
+  const stale = Number(sqlite.prepare('SELECT id FROM people WHERE assigned_to IS NOT NULL LIMIT 1').get()?.id);
   const lost = await pageB.evaluate(
     async (id) =>
       (await fetch(`/api/people/${id}/claim`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status,

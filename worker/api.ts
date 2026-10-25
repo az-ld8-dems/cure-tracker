@@ -9,6 +9,7 @@ import type {
   ContactMethod,
   Me,
   Note,
+  PeoplePage,
   Person,
   PersonDetail,
   ResetResult,
@@ -16,7 +17,7 @@ import type {
   Volunteer,
   VolunteerStats,
 } from '../src/api.d.ts';
-import type { Db, Stmt } from './db.ts';
+import type { Db, Stmt, Value } from './db.ts';
 import { ImportError } from './import.ts';
 import { applyUpload, graceCycles, MAX_GRACE_CYCLES, PartialUploadError, previewUpload, uploadRecord } from './uploads.ts';
 
@@ -184,9 +185,118 @@ async function listVolunteers(c: Ctx): Promise<Response> {
   return json(results);
 }
 
-async function listPeople(c: Ctx): Promise<Response> {
-  const { results } = await c.db.prepare(`${PERSON_SELECT} ORDER BY p.id`).all<PersonRow>();
-  return json(results.map((r) => toPerson(r, c.today)));
+// The pool: open people nobody has claimed. The partial index people_pool covers exactly this condition, so keep it word for word.
+const POOL_WHERE = "p.assigned_to IS NULL AND p.status != 'cured'";
+// Longest uncured first is the earliest status date first, people with no date last. The expression is the one people_pool indexes.
+const DAYS_ORDER = "COALESCE(p.status_date, '9999-12-31'), p.id";
+const PEOPLE_SORTS = new Map([
+  ['days', DAYS_ORDER],
+  ['precinct', `p.precinct COLLATE NOCASE, ${DAYS_ORDER}`],
+  ['city', `p.city COLLATE NOCASE, ${DAYS_ORDER}`],
+  ['name', 'p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE, p.id'],
+]);
+const DEFAULT_PAGE = 50;
+const MAX_PAGE = 200;
+// A volunteer's own list is not paged by the pages, and an admin can move someone's whole list to another volunteer.
+const MAX_MINE = 1000;
+const MAX_FILTER = 100;
+
+// A LIKE pattern for "contains this text", with the wildcards in the text taken literally (the query says ESCAPE '\').
+const containing = (s: string): string => `%${s.replace(/[\\%_]/g, '\\$&')}%`;
+
+function intParam(url: URL, name: string, fallback: number, min: number, max: number): number {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${name} must be a whole number from ${min} to ${max}`);
+  return n;
+}
+
+function filterParam(url: URL, name: string): string {
+  const v = (url.searchParams.get(name) ?? '').trim();
+  if (v.length > MAX_FILTER) throw new HttpError(400, `${name} is too long (at most ${MAX_FILTER} characters)`);
+  return v;
+}
+
+// People, a page at a time. scope=pool (the default) is who still needs a volunteer, scope=mine is the caller's own people, and
+// scope=all (admins) is everyone. city and party match exactly; precinct, and q (name, street and, for admins, phone) match any part.
+async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Promise<Response> {
+  const scope = url.searchParams.get('scope') ?? 'pool';
+  if (scope !== 'pool' && scope !== 'mine' && scope !== 'all') throw new HttpError(400, 'scope must be pool, mine or all');
+  if (scope === 'all' && !c.isAdmin) throw new HttpError(403, 'Forbidden');
+  const order = PEOPLE_SORTS.get(url.searchParams.get('sort') ?? 'days');
+  if (order === undefined) throw new HttpError(400, `sort must be one of ${[...PEOPLE_SORTS.keys()].join(', ')}`);
+  const limit = intParam(url, 'limit', scope === 'mine' ? MAX_MINE : DEFAULT_PAGE, 1, scope === 'mine' ? MAX_MINE : MAX_PAGE);
+  const offset = intParam(url, 'offset', 0, 0, 1_000_000);
+
+  const where: string[] = [];
+  const binds: Value[] = [];
+  if (scope === 'pool') where.push(POOL_WHERE);
+  if (scope === 'mine') {
+    where.push('p.assigned_to = ?');
+    binds.push(c.me.id);
+  }
+  const base = { where: [...where], binds: [...binds] };
+  const city = filterParam(url, 'city');
+  if (city !== '') {
+    where.push('p.city = ?');
+    binds.push(city);
+  }
+  const party = filterParam(url, 'party');
+  if (party !== '') {
+    where.push('p.party = ?');
+    binds.push(party);
+  }
+  const precinct = filterParam(url, 'precinct');
+  if (precinct !== '') {
+    where.push("p.precinct LIKE ? ESCAPE '\\'");
+    binds.push(containing(precinct));
+  }
+  const q = filterParam(url, 'q');
+  if (q !== '') {
+    where.push(
+      c.isAdmin
+        ? "(p.first_name || ' ' || p.last_name || ' ' || p.address || ' ' || p.phone) LIKE ? ESCAPE '\\'"
+        : "(p.first_name || ' ' || p.last_name || ' ' || p.address) LIKE ? ESCAPE '\\'",
+    );
+    binds.push(containing(q));
+  }
+
+  const clause = where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`;
+  const total =
+    (
+      await c.db
+        .prepare(`SELECT COUNT(*) AS n FROM people p${clause}`)
+        .bind(...binds)
+        .first<{ n: number }>()
+    )?.n ?? 0;
+  const { results } = await c.db
+    .prepare(`${PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`)
+    .bind(...binds, limit, offset)
+    .all<PersonRow>();
+  const page: PeoplePage = { people: results.map((r) => toPerson(r, c.today)), total };
+
+  if (scope === 'pool') {
+    const filtered = where.length > base.where.length;
+    page.open = filtered
+      ? ((
+          await c.db
+            .prepare(`SELECT COUNT(*) AS n FROM people p WHERE ${base.where.join(' AND ')}`)
+            .bind(...base.binds)
+            .first<{ n: number }>()
+        )?.n ?? 0)
+      : total;
+    if (url.searchParams.get('facets') === '1') {
+      const distinct = async (column: 'city' | 'party' | 'precinct'): Promise<string[]> => {
+        const rows = await c.db
+          .prepare(`SELECT DISTINCT p.${column} AS v FROM people p WHERE ${POOL_WHERE} AND p.${column} != '' ORDER BY p.${column}`)
+          .all<{ v: string }>();
+        return rows.results.map((r) => r.v);
+      };
+      page.facets = { cities: await distinct('city'), parties: await distinct('party'), precincts: await distinct('precinct') };
+    }
+  }
+  return json(page);
 }
 
 function parseDetail(raw: string): Record<string, unknown> {

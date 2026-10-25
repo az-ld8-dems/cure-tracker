@@ -1,7 +1,17 @@
 // The admin page: upload the state's sheet, see how curing is going, answer the people the upload flagged, move people between
 // volunteers, and read the audit log.
 
-import type { AdminSettings, AdminStats, AuditEntry, Person, ResetResult, UploadPreview, UploadRecord, Volunteer } from './api.d.ts';
+import type {
+  AdminSettings,
+  AdminStats,
+  AuditEntry,
+  PeoplePage,
+  Person,
+  ResetResult,
+  UploadPreview,
+  UploadRecord,
+  Volunteer,
+} from './api.d.ts';
 import { describeAudit } from './audit-text.ts';
 import {
   $,
@@ -361,19 +371,36 @@ if (me && !me.isAdmin) {
   }
 
   // ---- find someone and move them
-  let everyone: Person[] = [];
   function findSection(): void {
-    const q = h('input', { class: 'fl-input', id: 'find', type: 'search', autocomplete: 'off', oninput: () => results() });
+    let pause: ReturnType<typeof setTimeout> | undefined;
+    const q = h('input', {
+      class: 'fl-input',
+      id: 'find',
+      type: 'search',
+      autocomplete: 'off',
+      oninput: () => {
+        clearTimeout(pause);
+        pause = setTimeout(results, 250);
+      },
+    });
     const out = h('div', { class: 'fl-stack' });
-    function results(): void {
-      const needle = q.value.trim().toLowerCase();
+    // The server searches; a slow answer to an older search is dropped.
+    let searches = 0;
+    async function results(): Promise<void> {
+      const needle = q.value.trim();
+      const mine = ++searches;
       if (needle.length < 2) {
         clear(out, h('p', { class: 'fl-help' }, 'Type at least two letters.'));
         return;
       }
-      const found = everyone
-        .filter((p) => `${p.firstName} ${p.lastName} ${p.address} ${p.phone}`.toLowerCase().includes(needle))
-        .slice(0, 15);
+      let found: Person[];
+      try {
+        found = (await api<PeoplePage>('GET', `/api/people?scope=all&limit=15&q=${encodeURIComponent(needle)}`)).people;
+      } catch (e) {
+        if (mine === searches) clear(out, banner('warn', h('p', {}, failureText(e))));
+        return;
+      }
+      if (mine !== searches) return;
       clear(
         out,
         found.length === 0
@@ -476,15 +503,13 @@ if (me && !me.isAdmin) {
   }
 
   async function refresh(): Promise<void> {
-    const [stats, people, vols, firstPage, settings] = await Promise.all([
+    const [stats, vols, firstPage, settings] = await Promise.all([
       api<AdminStats>('GET', '/api/admin/stats'),
-      api<Person[]>('GET', '/api/people'),
       loadVolunteers(),
       api<AuditEntry[]>('GET', '/api/admin/audit?limit=50'),
       api<AdminSettings>('GET', '/api/admin/settings'),
     ]);
     volunteers = vols;
-    everyone = people;
     log = firstPage;
     settingsSection(settings);
     statsSection(stats);
