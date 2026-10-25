@@ -6,6 +6,9 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-11",
   "workers_dev": false,
+  // The site's address. A custom domain makes `wrangler deploy` create the DNS record and the certificate; the zone must be on this
+  // Cloudflare account, and the name must not already have a DNS record (docs/setup.md). The Access application uses the same hostname.
+  "routes": [{ "pattern": "azld8cures.com", "custom_domain": true }],
   "observability": {
     "enabled": true
   },
