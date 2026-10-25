@@ -18,8 +18,17 @@ interface ExistingRow {
   id: number;
   key: string;
   first_name: string;
+  middle_name: string;
   last_name: string;
+  party: string;
+  legdist: string;
+  reason_code: string;
+  phone: string;
   address: string;
+  city: string;
+  zip: string;
+  precinct: string;
+  status_date: string | null;
   status: ExistingPerson['status'];
   status_changed_at: string;
   flag: ExistingPerson['flag'];
@@ -28,14 +37,26 @@ interface ExistingRow {
 
 async function loadExisting(db: Db): Promise<ExistingPerson[]> {
   const { results } = await db
-    .prepare('SELECT id, key, first_name, last_name, address, status, status_changed_at, flag, contacted_cycles FROM people')
+    .prepare(
+      `SELECT id, key, first_name, middle_name, last_name, party, legdist, reason_code, phone, address, city, zip, precinct, status_date,
+         status, status_changed_at, flag, contacted_cycles FROM people`,
+    )
     .all<ExistingRow>();
   return results.map((r) => ({
     id: r.id,
     key: r.key,
     firstName: r.first_name,
+    middleName: r.middle_name,
     lastName: r.last_name,
+    party: r.party,
+    legdist: r.legdist,
+    reasonCode: r.reason_code,
+    phone: r.phone,
     address: r.address,
+    city: r.city,
+    zip: r.zip,
+    precinct: r.precinct,
+    statusDate: r.status_date,
     status: r.status,
     statusChangedAt: r.status_changed_at,
     flag: r.flag,
@@ -63,7 +84,7 @@ function previewOf(sheet: Sheet, plan: Plan): UploadPreview {
     skippedInvalid: sheet.skippedInvalid,
     duplicates: sheet.duplicates,
     added: plan.inserts.length,
-    updated: plan.updates.length,
+    updated: plan.updates.length + plan.unchanged,
     cured: plan.cures.length,
     stillUncured: plan.stillUncured,
     reappeared: plan.reappeared,
@@ -75,6 +96,52 @@ function previewOf(sheet: Sheet, plan: Plan): UploadPreview {
     cities: [...cities].map(([city, count]) => ({ city, count })).sort((a, b) => b.count - a.count || a.city.localeCompare(b.city)),
     columns: sheet.columns,
   };
+}
+
+// The values the Find people filters offer: the cities, parties and precincts of everyone still open. They only change when an upload
+// does, so the upload stores them (settings.facets) and a page reads one row instead of scanning the people.
+interface Facets {
+  cities: string[];
+  parties: string[];
+  precincts: string[];
+}
+
+const distinct = (values: string[]): string[] => [...new Set(values)].filter((v) => v !== '').sort();
+
+function facetsOf(people: { city: string; party: string; precinct: string }[]): Facets {
+  return {
+    cities: distinct(people.map((p) => p.city)),
+    parties: distinct(people.map((p) => p.party)),
+    precincts: distinct(people.map((p) => p.precinct)),
+  };
+}
+
+const saveFacets = (db: Db, facets: Facets): Stmt =>
+  db
+    .prepare("INSERT INTO settings (key, value) VALUES ('facets', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+    .bind(JSON.stringify(facets));
+
+// What the filters offer. Missing (before the first upload since this was added, or after a reset), it is worked out from the open people
+// and stored, which costs one scan, once.
+export async function savedFacets(db: Db): Promise<Facets> {
+  const row = await db.prepare("SELECT value FROM settings WHERE key = 'facets'").first<{ value: string }>();
+  try {
+    const raw: unknown = row ? JSON.parse(row.value) : null;
+    if (typeof raw === 'object' && raw !== null) {
+      const f = raw as Record<string, unknown>;
+      const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
+      if (strings(f.cities) && strings(f.parties) && strings(f.precincts))
+        return { cities: f.cities, parties: f.parties, precincts: f.precincts };
+    }
+  } catch {
+    // Damaged: work it out again.
+  }
+  const { results } = await db
+    .prepare("SELECT DISTINCT city, party, precinct FROM people WHERE status != 'cured'")
+    .all<{ city: string; party: string; precinct: string }>();
+  const facets = facetsOf(results);
+  if (results.length > 0) await saveFacets(db, facets).run();
+  return facets;
 }
 
 // How many uploads a person marked contacted may stay on the list before it counts as an unsuccessful cure (the admins' setting).
@@ -220,6 +287,9 @@ export async function applyUpload(db: Db, csv: string, options: ApplyOptions): P
         .bind(now, now, now, JSON.stringify(group)),
     );
   }
+
+  // Everyone on the sheet is open now, so the filters offer what the sheet has.
+  statements.push(saveFacets(db, facetsOf(sheet.people)));
 
   // The columns this upload read are what the next one starts from.
   const used: ColumnPick = {};

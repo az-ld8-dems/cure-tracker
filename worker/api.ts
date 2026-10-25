@@ -21,7 +21,16 @@ import type {
 } from '../src/api.d.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { FIELDS, ImportError } from './import.ts';
-import { applyUpload, columnsOf, graceCycles, MAX_GRACE_CYCLES, PartialUploadError, previewUpload, uploadRecord } from './uploads.ts';
+import {
+  applyUpload,
+  columnsOf,
+  graceCycles,
+  MAX_GRACE_CYCLES,
+  PartialUploadError,
+  previewUpload,
+  savedFacets,
+  uploadRecord,
+} from './uploads.ts';
 
 export interface ApiContext {
   db: Db;
@@ -223,7 +232,9 @@ function filterParam(url: URL, name: string): string {
 }
 
 // People, a page at a time. scope=pool (the default) is who still needs a volunteer, scope=mine is the caller's own people, and
-// scope=all (admins) is everyone. sort (days, precinct, city or name) runs the other way with dir=desc. city and party match exactly; precinct, and q (name, street and, for admins, phone) match any part.
+// scope=all (admins) is everyone. sort (days, precinct, city or name) runs the other way with dir=desc. city, precinct (ignoring case)
+// and party match exactly, which the indexes in migration 0003 answer; q (name, street and, for admins, phone) matches any part, which
+// reads every row that is left after the other filters. There is no count: the page asks for one person more than it shows (hasMore).
 async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Promise<Response> {
   const scope = url.searchParams.get('scope') ?? 'pool';
   if (scope !== 'pool' && scope !== 'mine' && scope !== 'all') throw new HttpError(400, 'scope must be pool, mine or all');
@@ -243,10 +254,9 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
     where.push('p.assigned_to = ?');
     binds.push(c.me.id);
   }
-  const base = { where: [...where], binds: [...binds] };
   const city = filterParam(url, 'city');
   if (city !== '') {
-    where.push('p.city = ?');
+    where.push('p.city COLLATE NOCASE = ?');
     binds.push(city);
   }
   const party = filterParam(url, 'party');
@@ -256,8 +266,8 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
   }
   const precinct = filterParam(url, 'precinct');
   if (precinct !== '') {
-    where.push("p.precinct LIKE ? ESCAPE '\\'");
-    binds.push(containing(precinct));
+    where.push('p.precinct COLLATE NOCASE = ?');
+    binds.push(precinct);
   }
   const q = filterParam(url, 'q');
   if (q !== '') {
@@ -270,39 +280,12 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
   }
 
   const clause = where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`;
-  const total =
-    (
-      await c.db
-        .prepare(`SELECT COUNT(*) AS n FROM people p${clause}`)
-        .bind(...binds)
-        .first<{ n: number }>()
-    )?.n ?? 0;
   const { results } = await c.db
     .prepare(`${PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`)
-    .bind(...binds, limit, offset)
+    .bind(...binds, limit + 1, offset)
     .all<PersonRow>();
-  const page: PeoplePage = { people: results.map((r) => toPerson(r, c.today)), total };
-
-  if (scope === 'pool') {
-    const filtered = where.length > base.where.length;
-    page.open = filtered
-      ? ((
-          await c.db
-            .prepare(`SELECT COUNT(*) AS n FROM people p WHERE ${base.where.join(' AND ')}`)
-            .bind(...base.binds)
-            .first<{ n: number }>()
-        )?.n ?? 0)
-      : total;
-    if (url.searchParams.get('facets') === '1') {
-      const distinct = async (column: 'city' | 'party' | 'precinct'): Promise<string[]> => {
-        const rows = await c.db
-          .prepare(`SELECT DISTINCT p.${column} AS v FROM people p WHERE ${POOL_WHERE} AND p.${column} != '' ORDER BY p.${column}`)
-          .all<{ v: string }>();
-        return rows.results.map((r) => r.v);
-      };
-      page.facets = { cities: await distinct('city'), parties: await distinct('party'), precincts: await distinct('precinct') };
-    }
-  }
+  const page: PeoplePage = { people: results.slice(0, limit).map((r) => toPerson(r, c.today)), hasMore: results.length > limit };
+  if (scope === 'pool' && url.searchParams.get('facets') === '1') page.facets = await savedFacets(c.db);
   return json(page);
 }
 
@@ -660,6 +643,7 @@ async function reset(c: Ctx, _p: string[], body: Body): Promise<Response> {
   await c.db.batch([
     c.db.prepare('DELETE FROM notes'),
     c.db.prepare('DELETE FROM people'),
+    c.db.prepare("DELETE FROM settings WHERE key = 'facets'"),
     c.db.prepare('DELETE FROM uploads'),
     auditStmt(c, 'reset', null, deleted),
   ]);
