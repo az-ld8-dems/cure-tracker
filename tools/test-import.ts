@@ -116,8 +116,17 @@ const known = (
     id,
     key: p.key,
     firstName: first,
+    middleName: p.middleName,
     lastName: 'Roe',
+    party: p.party,
+    legdist: p.legdist,
+    reasonCode: p.reasonCode,
+    phone: p.phone,
     address: p.address,
+    city: p.city,
+    zip: p.zip,
+    precinct: p.precinct,
+    statusDate: p.statusDate,
     status,
     statusChangedAt: changedAt,
     flag: null,
@@ -149,8 +158,8 @@ const GRACE = 1;
   );
   assert.deepEqual(plan.cures, [2], 'only the open person who left the sheet; the already cured one stays as is');
   const by = (id: number) => plan.updates.find((u) => u.id === id);
-  assert.equal(by(1)?.status, 'needs_contact');
-  assert.equal(by(1)?.flag, null);
+  assert.equal(by(1), undefined, 'a person the sheet leaves exactly as they are is not rewritten');
+  assert.equal(plan.unchanged, 1);
   assert.deepEqual([by(4)?.status, by(4)?.flag], ['needs_contact', 'reappeared'], 'a cured person who is back is reopened and flagged');
   assert.deepEqual(
     [by(5)?.status, by(5)?.flag, by(5)?.contactedCycles],
@@ -163,6 +172,19 @@ const GRACE = 1;
   assert.equal(plan.openBefore, 4);
   assert.equal(plan.looksPartial, false);
   assert.deepEqual(plan.audit.map((a) => a.action).sort(), ['import.reappeared', 'import.still_uncured']);
+
+  // Any detail the sheet changes makes it a rewrite; the contact status stays as it was.
+  const changed = planUpload(
+    [
+      { ...incoming('Stays'), phone: '602-555-0199' },
+      { ...incoming('Moved'), precinct: 'ELSEWHERE' },
+    ],
+    [known(1, 'Stays', 'needs_contact', '2026-10-01T00:00:00.000Z'), known(2, 'Moved', 'needs_contact', '2026-10-01T00:00:00.000Z')],
+    NOW,
+    GRACE,
+  );
+  assert.deepEqual(changed.updates.map((u) => u.id).sort(), [1, 2]);
+  assert.equal(changed.unchanged, 0);
 }
 
 // The grace period is how many uploads a contacted person may stay on the list before it is an unsuccessful cure.

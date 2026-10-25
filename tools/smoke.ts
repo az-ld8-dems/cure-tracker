@@ -109,25 +109,26 @@ try {
 
   // ---- find people, filter, claim
   await page.getByRole('link', { name: 'Find people', exact: true }).click();
-  await page.getByText(/Showing 30 of 40 people/).waitFor();
+  await page.getByText(/Showing 30 people, with more to show/).waitFor();
   await check(page, 'find people');
   // On a phone the filters (other than the search) are in a disclosure, closed at first.
   expect('find people', !(await page.getByLabel('City').isVisible()), 'the filters should start closed on a phone');
   await page.getByText('Filter and sort').click();
   await page.getByLabel('City').selectOption('Tempe');
-  await page.getByText(/Showing \d+ of \d+ people \(40 in all\)/).waitFor();
+  await page.getByText(/Showing \d+ people/).waitFor();
   const tempe = await page.locator('.pool-row').count();
   expect('find people', tempe > 0 && tempe <= 30, `filtering by city showed ${tempe} cards`);
   await page.getByLabel('City').selectOption('');
   await page.getByLabel('Search name or street').fill('zzzz');
-  await page.getByText('Showing 0 of 0 people (40 in all).').waitFor();
+  await page.getByText('Nobody matches.').waitFor();
   await page.getByLabel('Search name or street').fill('');
   await page.getByLabel('Sort by').selectOption('name');
   const firstRow = page.locator('.pool-row').first();
   const claimedName = (await firstRow.locator('strong').textContent()) ?? '';
   await firstRow.getByRole('button', { name: /^Claim / }).click();
   await page.getByText(`${claimedName} is on your list now.`).waitFor();
-  await page.getByText(/Showing 30 of 39 people/).waitFor();
+  // The claimed person leaves the page, which does not refill: 29 are left of the 30 it showed, with more behind them.
+  await page.getByText(/Showing 29 people, with more to show/).waitFor();
 
   // A second volunteer loses the race for the same person: the server says so, and the page shows the pool as it is.
   const ctxB = await context('walt@example.com');
@@ -136,7 +137,7 @@ try {
   await pageB.goto(`${base}/pool/`);
   await pageB.getByLabel('Your name').fill('Walt Webb');
   await pageB.getByRole('button', { name: 'Continue' }).click();
-  await pageB.getByText(/Showing 30 of 39 people/).waitFor();
+  await pageB.getByText(/Showing 30 people, with more to show/).waitFor();
   const stale = Number(sqlite.prepare('SELECT id FROM people WHERE assigned_to IS NOT NULL LIMIT 1').get()?.id);
   const lost = await pageB.evaluate(
     async (id) =>
@@ -277,7 +278,7 @@ try {
   await doraPage.getByRole('button', { name: 'Continue' }).click();
   await doraPage.getByText('You have nobody yet.').waitFor();
   await doraPage.goto(`${base}/pool/`);
-  await doraPage.getByText(/Showing 30 of/).waitFor();
+  await doraPage.getByText(/Showing 30 people/).waitFor();
   await doraPage
     .locator('.pool-row')
     .first()

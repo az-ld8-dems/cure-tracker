@@ -71,7 +71,7 @@ async function everyone(): Promise<Person[]> {
   for (;;) {
     const page = await ok<PeoplePage>(admin, 'GET', `/api/people?scope=all&limit=200&offset=${out.length}`);
     out.push(...page.people);
-    if (page.people.length === 0 || out.length >= page.total) return out.sort((a, b) => a.id - b.id);
+    if (!page.hasMore) return out.sort((a, b) => a.id - b.id);
   }
 }
 

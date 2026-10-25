@@ -248,12 +248,22 @@ export function readSheet(text: string): Sheet {
   return { people: list, rows: table.length - 1, skippedOtherDistrict, skippedInvalid, duplicates, warnings };
 }
 
+// A person as the database has them: what planUpload needs to tell a changed person from an unchanged one, so an upload writes only the first.
 export interface ExistingPerson {
   id: number;
   key: string;
   firstName: string;
+  middleName: string;
   lastName: string;
+  party: string;
+  legdist: string;
+  reasonCode: string;
+  phone: string;
   address: string;
+  city: string;
+  zip: string;
+  precinct: string;
+  statusDate: string | null;
   status: Status;
   statusChangedAt: string;
   flag: Flag | null;
@@ -283,6 +293,8 @@ export interface Plan {
   audit: PlannedAudit[];
   stillUncured: number;
   reappeared: number;
+  // People already known whose details and status the sheet leaves as they are: not rewritten.
+  unchanged: number;
   openBefore: number;
   looksPartial: boolean;
   possibleMatches: PossibleMatch[];
@@ -307,6 +319,7 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
   const audit: PlannedAudit[] = [];
   let stillUncured = 0;
   let reappeared = 0;
+  let unchanged = 0;
   for (const p of incoming) {
     const known = byKey.get(p.key);
     if (!known) {
@@ -336,7 +349,27 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
         });
       }
     }
-    updates.push({ id: known.id, incoming: p, status, flag, statusChangedAt, contactedCycles });
+    // Everything a rewrite would set is what the row has already: leave it alone. Each rewritten row is one row written for the table and one
+    // for every index, and a day's sheet is mostly the day before's.
+    const same =
+      status === known.status &&
+      flag === known.flag &&
+      statusChangedAt === known.statusChangedAt &&
+      contactedCycles === known.contactedCycles &&
+      p.firstName === known.firstName &&
+      p.middleName === known.middleName &&
+      p.lastName === known.lastName &&
+      p.party === known.party &&
+      p.legdist === known.legdist &&
+      p.reasonCode === known.reasonCode &&
+      p.phone === known.phone &&
+      p.address === known.address &&
+      p.city === known.city &&
+      p.zip === known.zip &&
+      p.precinct === known.precinct &&
+      p.statusDate === known.statusDate;
+    if (same) unchanged++;
+    else updates.push({ id: known.id, incoming: p, status, flag, statusChangedAt, contactedCycles });
   }
   const gone = existing.filter((p) => !onSheet.has(p.key) && p.status !== 'cured');
   const openBefore = existing.filter((p) => p.status !== 'cured').length;
@@ -376,6 +409,7 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
     audit,
     stillUncured,
     reappeared,
+    unchanged,
     openBefore,
     // A file that would cure most of the open people is probably a partial export, not a good day.
     looksPartial: openBefore >= 10 && gone.length > openBefore / 2,
