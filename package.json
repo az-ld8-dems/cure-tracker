@@ -17,6 +17,7 @@
     "test:people": "node tools/test-people.ts",
     "test:upload-sql": "node tools/test-upload-sql.ts",
     "bench": "node tools/bench-scale.ts",
+    "synthetic": "node tools/make-synthetic-sheet.ts",
     "test:lighthouse": "node tools/test-lighthouse-budgets.ts",
     "smoke": "node tools/smoke.ts",
     "lighthouse": "node tools/lighthouse.ts",
