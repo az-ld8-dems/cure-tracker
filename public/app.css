@@ -209,6 +209,14 @@ h3 {
   justify-self: start;
 }
 
+/* The status badge sits under the name, never beside it, however wide the card is */
+.card-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
 /* The three status buttons share the card's width, and their words wrap inside them */
 .status-seg {
   display: flex;

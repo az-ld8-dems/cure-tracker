@@ -111,7 +111,7 @@ if (me) {
     return h(
       'li',
       { class: 'fl-card' },
-      h('div', { class: 'fl-card__head' }, h('h2', { class: 'fl-card__title' }, personName(p)), statusBadge(p.status)),
+      h('div', { class: 'card-head' }, h('h2', { class: 'fl-card__title' }, personName(p)), statusBadge(p.status)),
       p.flag ? flagBadge(p.flag) : null,
       facts(p, volunteers, false),
       h('button', { class: 'btn btn--accent', type: 'button', onclick: () => claim(p) }, `Claim ${personName(p)}`),
