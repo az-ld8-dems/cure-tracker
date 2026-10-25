@@ -160,6 +160,28 @@ export interface ColumnMap {
 // What an admin picks: a header of the file for a field, or null for "none". A field left out is matched by the saved choice or by name.
 export type ColumnPick = Partial<Record<ColumnField, string | null>>;
 
+// What the browser tells the Worker when it starts sending a sheet: what it found in the file, which the Worker cannot check, and how
+// many people will follow.
+export interface StageStart {
+  filename: string;
+  expected: number;
+  rows: number;
+  skippedOtherDistrict: number;
+  skippedInvalid: number;
+  duplicates: number;
+  warnings: string[];
+  cities: { city: string; count: number }[];
+  columns: ColumnMap;
+  // The column of the file used for each field.
+  used: ColumnPick;
+}
+
+// `chunk` is how many people the Worker takes in one request.
+export interface StageStarted {
+  token: string;
+  chunk: number;
+}
+
 export interface UploadPreview {
   // Rows of the sheet that were read, and how many were left out: another legislative district, no name or address, or a repeat of
   // a person already in the same file.

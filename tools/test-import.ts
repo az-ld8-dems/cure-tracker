@@ -1,17 +1,17 @@
-// Checks worker/import.ts: reading the state's sheet and planning an upload. Pure functions, no database.
+// Checks src/sheet.ts (reading the state's sheet) and tools/lib/plan.ts (what an upload does to the people already known, the reference the
+// SQL in worker/uploads.ts is held to by test-upload-sql.ts). Pure functions, no database.
 import assert from 'node:assert/strict';
 import {
   describeColumns,
-  type ExistingPerson,
   ImportError,
   normalizeKey,
   parseCsv,
   parseSheetDate,
-  planUpload,
   readSheet,
   resolveColumns,
   splitAddress,
-} from '../worker/import.ts';
+} from '../src/sheet.ts';
+import { type ExistingPerson, planUpload } from './lib/plan.ts';
 import { sheetCsv } from './lib/sheet.ts';
 
 // --- CSV

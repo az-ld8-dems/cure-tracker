@@ -37,6 +37,8 @@ import {
   toast,
   volunteerName,
 } from './common.ts';
+import { describeColumns, ImportError } from './sheet.ts';
+import { finishSheet, stageSheet } from './upload.ts';
 
 const me = await boot();
 const app = $('#app');
@@ -88,12 +90,13 @@ if (me && !me.isAdmin) {
   function uploadSection(): void {
     const file = h('input', { class: 'fl-input', id: 'sheet', type: 'file', accept: '.csv,text/csv,text/plain' });
     const result = h('div', { class: 'fl-stack', role: 'status' });
+    // The file's text, so the columns can be shown again when it cannot be read, and the upload the Worker is holding for it.
     let csv = '';
-    let filename = '';
+    let token = '';
 
     const show = (...children: (Node | null)[]) => clear(result, ...children);
     const problem = (e: unknown): HTMLElement => {
-      const failure = e instanceof ApiFailure ? e : null;
+      const failure = e instanceof ApiFailure || e instanceof ImportError ? e : null;
       return banner(
         'warn',
         h('p', {}, h('strong', {}, failureText(e))),
@@ -167,17 +170,32 @@ if (me && !me.isAdmin) {
         return;
       }
       picks = choice;
-      filename = chosen.name;
+      token = '';
       csv = await chosen.text();
-      show(h('p', { class: 'fl-help' }, 'Checking the file…'));
+      show(h('p', { class: 'fl-help' }, 'Reading the file…'));
+      let tenth = -1;
       try {
-        showPreview(await api<UploadPreview>('POST', '/api/admin/uploads/preview', { csv, filename, columns: picks }));
+        const staged = await stageSheet(csv, chosen.name, api, {
+          ...(picks ? { picked: picks } : {}),
+          // Say so at every tenth, not every request: the status line is read out as it changes.
+          progress: (sent, total) => {
+            if (Math.floor((sent * 10) / total) === tenth) return;
+            tenth = Math.floor((sent * 10) / total);
+            show(h('p', { class: 'fl-help' }, `Sending the people to the server: ${sent} of ${total}…`));
+          },
+        });
+        token = staged.token;
+        showPreview(staged.preview);
       } catch (e) {
+        show(problem(e));
         // Most often the file's columns are not the ones expected: show them, so the admin can say which is which.
-        try {
-          show(problem(e), mappingForm(await api<ColumnMap>('POST', '/api/admin/uploads/columns', { csv, columns: picks })));
-        } catch {
-          show(problem(e));
+        if (e instanceof ImportError) {
+          try {
+            const saved = await api<ColumnPick>('GET', '/api/admin/uploads/columns');
+            show(problem(e), mappingForm(describeColumns(csv, saved, picks)));
+          } catch {
+            show(problem(e));
+          }
         }
       }
     }
@@ -192,12 +210,7 @@ if (me && !me.isAdmin) {
           onclick: async () => {
             go.disabled = true;
             try {
-              const done = await api<UploadPreview & { id: number }>('POST', '/api/admin/uploads', {
-                csv,
-                filename,
-                force: force.checked,
-                columns: picks,
-              });
+              const done = await finishSheet(token, force.checked, api);
               toast(`Upload ${done.id} applied: ${p.added} added, ${p.cured} cured.`);
               file.value = '';
               show(banner('info', h('p', {}, `Uploaded. ${p.added} added, ${p.cured} cured, ${p.stillUncured + p.reappeared} flagged.`)));

@@ -5,6 +5,7 @@ import type { PeoplePage } from '../src/api.d.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { sheetCsv, syntheticPeople } from './lib/sheet.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
+import { type Send, uploadCsv } from './lib/upload-test.ts';
 
 console.warn = () => {};
 console.error = () => {};
@@ -27,6 +28,10 @@ async function call(as: string, method: string, path: string, body?: unknown) {
   const res = await handle(new Request(`https://cure.example${path}`, init), env, { verifier, now: () => clock });
   return { status: res.status, data: (await res.json()) as unknown };
 }
+const sendAs =
+  (as: string): Send =>
+  (method, path, body) =>
+    call(as, method, path, body);
 async function page(as: string, query: string): Promise<PeoplePage> {
   const r = await call(as, 'GET', `/api/people${query}`);
   assert.equal(r.status, 200, `${query}: ${JSON.stringify(r.data)}`);
@@ -37,7 +42,7 @@ const admin = 'admin@example.com';
 const vera = 'vera@example.com';
 // 120 people in 12 precincts, in the stock sheet's five cities, with status dates spread over twenty days.
 const sheet = syntheticPeople(120).map((p, i) => ({ ...p, precinct: `PRECINCT ${String(i % 12).padStart(2, '0')}` }));
-assert.equal((await call(admin, 'POST', '/api/admin/uploads', { csv: sheetCsv(sheet), filename: 'day1.csv' })).status, 201);
+await uploadCsv(sendAs(admin), sheetCsv(sheet), { filename: 'day1.csv' });
 
 // --- the pool is the default, a page at a time
 const first = await page(vera, '');
@@ -172,13 +177,11 @@ assert.equal((await page(vera, '?facets=1')).facets?.precincts.length, 12, 'miss
 assert.ok(sqlite.prepare("SELECT 1 FROM settings WHERE key = 'facets'").get(), 'and stored');
 
 // --- an upload writes only the people who changed
-const again = await call(admin, 'POST', '/api/admin/uploads', { csv: sheetCsv(sheet), filename: 'day2.csv' });
-assert.equal(again.status, 201);
-const upload2 = again.data as { updated: number; added: number; cured: number };
+const upload2 = await uploadCsv(sendAs(admin), sheetCsv(sheet), { filename: 'day2.csv' });
 assert.deepEqual([upload2.added, upload2.cured, upload2.updated], [0, 0, 120], 'the same sheet: everyone is known');
 assert.equal(Number(sqlite.prepare('SELECT COUNT(*) AS n FROM people WHERE last_upload_id = 2').get()?.n), 0, 'and nobody was rewritten');
 const moved = sheet.map((p, i) => (i === 5 ? { ...p, precinct: 'PRECINCT 99' } : p));
-await call(admin, 'POST', '/api/admin/uploads', { csv: sheetCsv(moved), filename: 'day3.csv' });
+await uploadCsv(sendAs(admin), sheetCsv(moved), { filename: 'day3.csv' });
 assert.equal(
   Number(sqlite.prepare('SELECT COUNT(*) AS n FROM people WHERE last_upload_id = 3').get()?.n),
   1,

@@ -30,7 +30,7 @@ The admin exports the LD8 tab of the state's workbook as CSV. Columns are matche
 
 ### What an upload does
 
-The admin picks the file and presses **Check the file**: nothing is written, and the page shows the counts, warnings and possible matches. **Upload this file** then applies it, all or nothing.
+The admin picks the file and presses **Check the file**. The browser reads the CSV (`src/sheet.ts`) and sends the people to the Worker a hundred at a time (`src/upload.ts`), because a free Worker has about 10 ms of CPU a request and could not read a large file; the page shows the progress. They wait in a scratch table (`upload_rows`); no person is changed. The page then shows the counts, warnings and possible matches, which the database works out by comparing the staged people with the people (SQL in `worker/uploads.ts`). **Upload this file** applies it, all or nothing, in one batch, without sending the file again. Only one upload is in flight: choosing a file again replaces the staged one, and the upload refuses to apply unless every person arrived. Because the people are read in key order, ids follow the key, not the sheet's order.
 
 1. A person not seen before is added as **Needs to be contacted**, unclaimed.
 2. A known person on the sheet has their details refreshed (phone, address, precinct, status date, ...). Their status and volunteer stay, with two exceptions that **flag** them:
@@ -55,4 +55,4 @@ Every change writes a row: who, when, what, which person. Joining, renaming, cla
 
 - No distance sorting: the sheet has addresses only and the app calls no outside service. Sort and filter are by days uncured, city, precinct, party and name.
 - No notifications, no email, no SMS from the app. Volunteers call or text from their own phones (the phone number is a `tel:` link).
-- D1 limits matter for big uploads: an upload is a handful of batched statements (100 rows each), well inside them for a few thousand rows.
+- D1 and Worker limits matter for big uploads (docs/decisions.md, 17): the browser reads the file, each request carries about a hundred people and one SQL statement, and the comparison and the changes are set operations inside D1. `npm run bench` times it on a synthetic 10,000-person sheet. Staging costs about one row written per person and is cleared after.

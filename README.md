@@ -13,8 +13,8 @@ How it works is in [docs/spec.md](docs/spec.md); setting it up on Cloudflare is 
 One Cloudflare Worker serves the static pages, a JSON API and the Access check, on one D1 database. TypeScript, Biome, npm, no runtime dependencies.
 
 ```
-worker/      the Worker: access.ts (Access JWT check), api.ts, import.ts (the sheet), uploads.ts
-src/         the pages' TypeScript, compiled to public/js/ by tools/build.sh
+worker/      the Worker: access.ts (Access JWT check), api.ts, uploads.ts (takes in and applies a sheet, in SQL)
+src/         the pages' TypeScript, compiled to public/js/ by tools/build.sh; sheet.ts (reads the CSV) and upload.ts (sends it) run in the browser
 public/      HTML, CSS, fonts, logos
 vendor/frostline/   a copy of avi.me's Frostline components (docs/design.md)
 db/migrations/   D1 schema
