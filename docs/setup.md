@@ -19,7 +19,7 @@ A later schema change is a new file in `db/migrations/`; run the same command ag
 ## 2. Access (Zero Trust)
 
 1. **Zero Trust dashboard, Settings, Authentication, Login methods.** Add **One-time PIN** (needs nothing else) and Google, if volunteers with Google accounts should use it. Volunteers without a Google account sign in with a PIN emailed to them.
-2. **Access, Applications, Add, Self-hosted.** Name `cure-tracker`, the domain you will deploy to (a `*.workers.dev` hostname does not work with Access in the same way; use a custom domain such as `cure.example.org`), no path. Session duration: the length of the campaign push is fine.
+2. **Access, Applications, Add, Self-hosted.** Name `cure-tracker`, domain `azld8cures.com` (the route in `wrangler.jsonc`), no path. A custom domain keeps Access and the Worker on one hostname; Cloudflare can also put Access in front of a `*.workers.dev` address, but that is a separate switch with its own audience tag. Session duration: the length of the campaign push is fine.
 3. **Policy:** Action Allow, Include **Emails**, one entry per volunteer and admin. Access's free plan covers 50 users. A person not in the policy never reaches the app.
 4. Open the application's settings and copy the **Application Audience (AUD) Tag** and your **team domain** (`yourteam.cloudflareaccess.com`).
 5. Put them in `wrangler.jsonc` under `vars`: `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`. They are not secrets. While either is empty, the Worker refuses every request.
@@ -29,7 +29,7 @@ Roles: an email in the Access policy is a volunteer; an email also in `ADMIN_EMA
 
 ## 3. Deploy
 
-Add the custom domain route in `wrangler.jsonc` (`"routes": [{ "pattern": "cure.example.org", "custom_domain": true }]`), then:
+The custom domain route is already in `wrangler.jsonc` (`azld8cures.com`). Before the first deploy the zone must be on this Cloudflare account, and the name must have no DNS record of its own (a parked-page A or CNAME record on the apex would make the deploy fail: delete it first). The deploy then creates the DNS record and the certificate. Then:
 
 ```bash
 npm ci
