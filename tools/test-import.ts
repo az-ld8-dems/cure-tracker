@@ -2,8 +2,10 @@
 // SQL in worker/uploads.ts is held to by test-upload-sql.ts). Pure functions, no database.
 import assert from 'node:assert/strict';
 import {
+  addressKey,
   describeColumns,
   ImportError,
+  nameKey,
   normalizeKey,
   parseCsv,
   parseSheetDate,
@@ -47,6 +49,42 @@ assert.deepEqual(
 // --- keys: case, punctuation, accents and the middle name do not matter
 assert.equal(normalizeKey('Ana', 'Peña', '12 N 1st St., Tempe'), normalizeKey('ANA', 'PENA', '12 n 1st st tempe'));
 assert.notEqual(normalizeKey('Ana', 'Pena', '12 N 1st St'), normalizeKey('Ana', 'Pena', '14 N 1st St'));
+
+// --- keys: the same person written two ways in two dumps is one key
+const same = (a: string, b: string, why?: string) => assert.equal(addressKey(a), addressKey(b), why);
+const differ = (a: string, b: string, why?: string) => assert.notEqual(addressKey(a), addressKey(b), why);
+same('1 E MAIN ST APT 2129 TEMPE, AZ 85281', '1 E MAIN ST 2129 TEMPE, AZ 85281', 'the unit word may be dropped');
+same('1 E MAIN ST UNIT 2129', '1 E MAIN ST # 2129', 'APT, UNIT, # and STE are one thing');
+same('1 E MAIN ST STE 5', '1 E MAIN ST SUITE 5');
+same('1 E MAIN ST BLDG B', '1 E MAIN ST B');
+same('1 E MAIN ST PHOENIX, AZ 85018', '1 E MAIN ST PHOENIX, AZ 85018-1234', 'ZIP+4');
+same('1 E MAIN ST PHOENIX, AZ 85018', '1 E MAIN ST PHOENIX, AZ 85016', 'a corrected ZIP');
+same('1 E MAIN ST PHOENIX, AZ 85018', '1 E MAIN ST SCOTTSDALE, AZ 85251', 'a corrected city: the street line is the identity');
+same('1 E MAIN ST PHOENIX, AZ 85018', '1 E MAIN ST', 'no city, state or ZIP');
+same('1 E MAIN ST PHOENIX 85018', '1 E MAIN ST PHOENIX, AZ', 'a ZIP with no state, a state with no ZIP');
+same('3302 NORTH 47TH PLACE', '3302 N 47TH PL', 'directionals and suffixes');
+same('12 West Camelback Road', '12 W CAMELBACK RD.');
+same('5 SOUTHWEST CIRCLE', '5 SW CIR');
+same('PO BOX 12 MESA, AZ 85201', 'P.O. Box 12', 'a post office box');
+same('PO BOX 12', 'POST OFFICE BOX 12');
+same('7 SAINT JOHN ST', '7 ST JOHN STREET');
+same('7 ñandú ST', '7 NANDU STREET', 'accents');
+differ('1 E MAIN ST APT 2', '1 E MAIN ST APT 3', 'a different unit is a different address');
+differ('1 E MAIN ST', '1 E MAIN ST APT 2', 'a unit the other dump left out is not guessed: it is listed as a possible match');
+differ('1 E MAIN ST', '1 W MAIN ST', 'a different direction');
+differ('1 E MAIN ST', '10 E MAIN ST');
+differ('1 E MAIN ST', '1 E MAIN AVE');
+assert.equal(addressKey('1 E MAIN ST PHOENIX, AZ 85018'), '1 E MAIN ST');
+assert.equal(addressKey('9 W ELM ST NOWHEREVILLE, AZ 85000'), '9 W ELM ST NOWHEREVILLE', 'an unknown city stays in the key');
+assert.equal(addressKey('200 N DR'), '200 N DR', 'a short street is not eaten');
+assert.equal(addressKey(''), '');
+assert.equal(nameKey("O'Brien"), nameKey('O Brien'));
+assert.equal(nameKey('De La Cruz'), nameKey('DELACRUZ'));
+assert.equal(nameKey('Smith-Jones'), nameKey('SMITH JONES'));
+assert.equal(nameKey('José'), 'JOSE');
+assert.notEqual(nameKey('Smith Jr'), nameKey('Smith Sr'), 'a father and son at one address are two people');
+assert.equal(normalizeKey('Ana', 'Peña', '1 E Main St Apt 4 Tempe, AZ 85281'), 'ANA|PENA|1 E MAIN ST 4');
+assert.match(normalizeKey('A', 'B', '9 ELM ST'), /^[A-Z0-9]*\|[A-Z0-9]*\|[A-Z0-9 ]*$/, 'a key has only what the Worker accepts');
 
 // --- addresses
 assert.deepEqual(splitAddress('3302 N 47TH PL PHOENIX, AZ 85018'), { city: 'Phoenix', zip: '85018' });

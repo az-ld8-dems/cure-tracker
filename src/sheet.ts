@@ -160,6 +160,7 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((f) => f.trim() !== ''));
 }
 
+// Spaces and punctuation reduced to single spaces, upper case, without accents.
 export const clean = (s: string): string =>
   s
     .normalize('NFD')
@@ -168,10 +169,121 @@ export const clean = (s: string): string =>
     .replace(/[^A-Z0-9]+/g, ' ')
     .trim();
 
-// The sheet has no stable id, so a person is their normalized first name, last name and address. Middle names, punctuation, case and
-// spacing do not count.
+// Bump when the keys below would come out differently for the same sheet: every person already in the database has a key made the old
+// way, so the next upload would see them all as new. The upload page warns while the stored version differs (worker/uploads.ts).
+export const KEY_VERSION = 2;
+
+// A name with nothing but its letters and digits: O'Brien, O Brien and OBRIEN are one name, and so are De La Cruz and DeLaCruz.
+export function nameKey(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+// How the state and the post office write the same street: STREET and ST, NORTH and N. After USPS Publication 28's standard forms.
+const WORDS = new Map(
+  Object.entries({
+    NORTH: 'N',
+    SOUTH: 'S',
+    EAST: 'E',
+    WEST: 'W',
+    NORTHEAST: 'NE',
+    NORTHWEST: 'NW',
+    SOUTHEAST: 'SE',
+    SOUTHWEST: 'SW',
+    ALLEY: 'ALY',
+    AVENUE: 'AVE',
+    AV: 'AVE',
+    BOULEVARD: 'BLVD',
+    CANYON: 'CYN',
+    CENTER: 'CTR',
+    CIRCLE: 'CIR',
+    CIRC: 'CIR',
+    COURT: 'CT',
+    CRT: 'CT',
+    CREEK: 'CRK',
+    CROSSING: 'XING',
+    DRIVE: 'DR',
+    DRV: 'DR',
+    EXPRESSWAY: 'EXPY',
+    FREEWAY: 'FWY',
+    GARDEN: 'GDN',
+    GARDENS: 'GDNS',
+    GLEN: 'GLN',
+    GROVE: 'GRV',
+    HEIGHTS: 'HTS',
+    HIGHWAY: 'HWY',
+    JUNCTION: 'JCT',
+    LANE: 'LN',
+    MEADOWS: 'MDWS',
+    MOUNTAIN: 'MTN',
+    PARKWAY: 'PKWY',
+    PKY: 'PKWY',
+    PLACE: 'PL',
+    PLAZA: 'PLZ',
+    POINT: 'PT',
+    RIDGE: 'RDG',
+    ROAD: 'RD',
+    SPRINGS: 'SPGS',
+    SQUARE: 'SQ',
+    STREET: 'ST',
+    TERRACE: 'TER',
+    TERR: 'TER',
+    TRAIL: 'TRL',
+    VALLEY: 'VLY',
+    VIEW: 'VW',
+    VILLAGE: 'VLG',
+    VISTA: 'VIS',
+    SAINT: 'ST',
+  }),
+);
+
+// What introduces an apartment, unit or suite number. The number stays: `APT 2129`, `UNIT 2129`, `# 2129` and `2129` are one address.
+const UNIT_WORDS = new Set([
+  'APT',
+  'APARTMENT',
+  'UNIT',
+  'STE',
+  'SUITE',
+  'BLDG',
+  'BUILDING',
+  'FL',
+  'FLOOR',
+  'RM',
+  'ROOM',
+  'LOT',
+  'SPC',
+  'SPACE',
+  'TRLR',
+]);
+
+// The address as a key: the street line only, so a ZIP+4, a corrected ZIP or city, or a state does not make a new person, with the
+// words the state spells differently from one dump to the next made the same (STREET and ST, APT 2 and 2, PO Box and P.O. BOX). The
+// address stored and shown is still the one the sheet had.
+export function addressKey(address: string): string {
+  let s = clean(address).replace(/\bP O BOX\b|\bPOST OFFICE BOX\b|\bPOBOX\b/g, 'PO BOX');
+  // State and ZIP (with or without the +4) at the end.
+  const noState = s.replace(/ (AZ|ARIZONA)( \d{5}( \d{4})?)?$/, '');
+  if (noState !== s) s = noState;
+  // A city at the end, with the street line before it (a ZIP written without a state is dropped first when a city precedes it).
+  const noZip = s.replace(/ \d{5}( \d{4})?$/, '');
+  for (const stem of [noZip, s]) {
+    const city = CITIES.find((c) => stem.endsWith(` ${c}`) && stem.slice(0, -c.length - 1).includes(' '));
+    if (city) {
+      s = stem.slice(0, -city.length - 1);
+      break;
+    }
+  }
+  const tokens = s.split(' ').filter((w, i) => i === 0 || !UNIT_WORDS.has(w));
+  return tokens.map((w, i) => (i === 0 ? w : (WORDS.get(w) ?? w))).join(' ');
+}
+
+// The sheet has no stable id, so a person is their normalized first name, last name and address (nameKey, addressKey). Middle names,
+// punctuation, case and spacing do not count.
 export function normalizeKey(first: string, last: string, address: string): string {
-  return `${clean(first)}|${clean(last)}|${clean(address)}`;
+  return `${nameKey(first)}|${nameKey(last)}|${addressKey(address)}`;
 }
 
 // Cities in and around Maricopa County, as the state writes them. The address is "3302 N 47TH PL PHOENIX, AZ 85018": no comma

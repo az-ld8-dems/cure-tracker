@@ -4,7 +4,7 @@
 // people, people who leave, and corrected names. Synthetic data only; the random numbers are seeded, so a failure repeats.
 import assert from 'node:assert/strict';
 import type { Flag, Status } from '../src/api.d.ts';
-import { type IncomingPerson, normalizeKey, splitAddress } from '../src/sheet.ts';
+import { type IncomingPerson, KEY_VERSION, normalizeKey, splitAddress } from '../src/sheet.ts';
 import { finishStage, planStage, setMerges, stageRows, startStage } from '../worker/uploads.ts';
 import { type ExistingPerson, MATCH_LIMIT, planUpload } from './lib/plan.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
@@ -216,6 +216,7 @@ for (let seed = 1; seed <= 250; seed++) {
   // --- the SQL
   const { token } = await startStage(db, 'a@example.com', NOW, {
     filename: 'x.csv',
+    keyVersion: KEY_VERSION,
     expected: sheet.length,
     rows: sheet.length,
     skippedOtherDistrict: 0,
