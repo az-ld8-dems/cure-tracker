@@ -5,6 +5,9 @@ import type {
   AdminSettings,
   AdminStats,
   AuditEntry,
+  ColumnField,
+  ColumnMap,
+  ColumnPick,
   PeoplePage,
   Person,
   ResetResult,
@@ -98,19 +101,84 @@ if (me && !me.isAdmin) {
       );
     };
 
-    async function check(): Promise<void> {
+    // Which column of the file is which field, as the admin chose it. Unset, the server matches by name and by what the last upload used.
+    let picks: ColumnPick | undefined;
+
+    // The file's columns and what each field is matched to, as selects. It is open when a required column has no match.
+    function mappingForm(map: ColumnMap): HTMLElement {
+      const matched = map.choices.filter((c) => c.header !== null).length;
+      const selects = new Map<ColumnField, HTMLSelectElement>();
+      const rows = map.choices.map((c) => {
+        const example = h('p', { class: 'fl-help', id: `col-${c.field}-example` });
+        const select = h(
+          'select',
+          { class: 'fl-select', id: `col-${c.field}`, 'aria-describedby': example.id },
+          h('option', { value: '' }, c.required ? 'Choose a column' : 'No column in this file'),
+          ...map.headers.map((name) => h('option', { value: name, selected: name === c.header }, name)),
+        );
+        const showExample = () => {
+          const sample = select.value === '' ? null : map.sample[map.headers.indexOf(select.value)];
+          example.textContent = sample === null || sample === undefined ? '' : `Example: ${sample === '' ? '(empty)' : sample}`;
+        };
+        select.addEventListener('change', showExample);
+        showExample();
+        selects.set(c.field, select);
+        const wrap = field(`col-${c.field}`, c.required ? `${c.label} (needed)` : c.label, select);
+        wrap.append(example);
+        return wrap;
+      });
+      const again = h(
+        'button',
+        {
+          class: 'btn',
+          type: 'button',
+          onclick: () => {
+            const chosen: ColumnPick = {};
+            for (const [name, select] of selects) chosen[name] = select.value === '' ? null : select.value;
+            void check(chosen);
+          },
+        },
+        'Check the file again',
+      );
+      const box = h(
+        'details',
+        { class: 'fl-disclosure' },
+        h('summary', {}, `Columns: ${matched} of ${map.choices.length} matched`),
+        h(
+          'div',
+          { class: 'fl-stack fl-stack--3' },
+          h(
+            'p',
+            { class: 'fl-help' },
+            'The state may rename or move columns. Say which column of this file holds each thing; the next upload starts from this.',
+          ),
+          h('div', { class: 'fl-toolbar columns-grid' }, ...rows),
+          h('div', { class: 'fl-cluster' }, again),
+        ),
+      );
+      box.open = !map.ready;
+      return box;
+    }
+
+    async function check(choice?: ColumnPick): Promise<void> {
       const chosen = file.files?.[0];
       if (!chosen) {
         show(banner('warn', h('p', {}, 'Choose the CSV file first.')));
         return;
       }
+      picks = choice;
       filename = chosen.name;
       csv = await chosen.text();
       show(h('p', { class: 'fl-help' }, 'Checking the file…'));
       try {
-        showPreview(await api<UploadPreview>('POST', '/api/admin/uploads/preview', { csv, filename }));
+        showPreview(await api<UploadPreview>('POST', '/api/admin/uploads/preview', { csv, filename, columns: picks }));
       } catch (e) {
-        show(problem(e));
+        // Most often the file's columns are not the ones expected: show them, so the admin can say which is which.
+        try {
+          show(problem(e), mappingForm(await api<ColumnMap>('POST', '/api/admin/uploads/columns', { csv, columns: picks })));
+        } catch {
+          show(problem(e));
+        }
       }
     }
 
@@ -124,7 +192,12 @@ if (me && !me.isAdmin) {
           onclick: async () => {
             go.disabled = true;
             try {
-              const done = await api<UploadPreview & { id: number }>('POST', '/api/admin/uploads', { csv, filename, force: force.checked });
+              const done = await api<UploadPreview & { id: number }>('POST', '/api/admin/uploads', {
+                csv,
+                filename,
+                force: force.checked,
+                columns: picks,
+              });
               toast(`Upload ${done.id} applied: ${p.added} added, ${p.cured} cured.`);
               file.value = '';
               show(banner('info', h('p', {}, `Uploaded. ${p.added} added, ${p.cured} cured, ${p.stillUncured + p.reappeared} flagged.`)));
@@ -189,6 +262,7 @@ if (me && !me.isAdmin) {
               `Upload it anyway. I know this cures ${p.cured} of ${p.openBefore} people.`,
             )
           : null,
+        mappingForm(p.columns),
         go,
         h('p', { class: 'fl-help' }, `Cities found: ${p.cities.map((c) => `${c.city || 'unknown'} (${c.count})`).join(', ')}.`),
       );
@@ -206,7 +280,7 @@ if (me && !me.isAdmin) {
           'Export the LD8 tab as a CSV and choose it here. Nothing changes until you press Upload; this check only shows what would happen.',
         ),
         field('sheet', 'CSV file', file),
-        h('button', { class: 'btn', type: 'button', onclick: check }, 'Check the file'),
+        h('button', { class: 'btn', type: 'button', onclick: () => check() }, 'Check the file'),
         result,
       ),
     );

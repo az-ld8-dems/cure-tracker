@@ -1,7 +1,7 @@
 // Reads the state's sheet (the LD8 tab exported as CSV) and works out what an upload changes, without touching the database: the
 // people to add, update, cure or flag. worker/uploads.ts runs the plan. Free of Worker-only globals, so Node tests it. Only erasable
 // TypeScript syntax.
-import type { Flag, PossibleMatch, Status } from '../src/api.d.ts';
+import type { ColumnChoice, ColumnField, ColumnMap, ColumnPick, Flag, PossibleMatch, Status } from '../src/api.d.ts';
 
 export class ImportError extends Error {
   problems: string[];
@@ -11,9 +11,90 @@ export class ImportError extends Error {
   }
 }
 
-// What the sheet calls its columns. FIRST, LAST and ADDRESS identify a person, so they must be there; the rest are optional because
-// the columns on the real sheets vary, though their names do not.
-const REQUIRED = ['FIRST', 'LAST', 'ADDRESS'];
+// The columns the importer reads, and what the state has called them. A header matches by name when, ignoring case and anything that is
+// not a letter or digit, it is one of `names` ("Precinct Name" and PRECINCT_NAME are the same). First, last and address identify a
+// person, so they must be there; the rest are optional because the columns on the real sheets vary.
+interface FieldSpec {
+  key: ColumnField;
+  label: string;
+  required: boolean;
+  names: string[];
+}
+
+export const FIELDS: FieldSpec[] = [
+  { key: 'first', label: 'First name', required: true, names: ['FIRST', 'FIRSTNAME'] },
+  { key: 'middle', label: 'Middle name', required: false, names: ['MID', 'MIDDLE', 'MIDDLENAME', 'MI'] },
+  { key: 'last', label: 'Last name', required: true, names: ['LAST', 'LASTNAME'] },
+  { key: 'address', label: 'Address', required: true, names: ['ADDRESS', 'RESIDENCEADDRESS'] },
+  { key: 'statusDate', label: 'Status date', required: false, names: ['STATUSDATE'] },
+  { key: 'party', label: 'Party', required: false, names: ['PARTY'] },
+  { key: 'legdist', label: 'Legislative district', required: false, names: ['LEGDIST', 'LD', 'LEGISLATIVEDISTRICT'] },
+  { key: 'reasonCode', label: 'Reason', required: false, names: ['REASONCODE', 'REASON'] },
+  { key: 'phone', label: 'Phone', required: false, names: ['PHONE', 'PHONENUMBER'] },
+  { key: 'precinct', label: 'Precinct', required: false, names: ['PRECINCTNAME', 'PRECINCT'] },
+];
+
+const letters = (s: string): string => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+// A header is looked up as written, ignoring case and the spaces around it; with the same header twice, the first one wins.
+const sameHeader = (a: string, b: string): boolean => a.trim().toUpperCase() === b.trim().toUpperCase();
+
+export interface Columns {
+  // The index in each row of the column used for each field; -1 when there is none.
+  index: Record<ColumnField, number>;
+  map: ColumnMap;
+}
+
+// Decides which column of the file feeds each field. `picked` (what an admin chose for this file) wins, then `saved` (what the last
+// upload used) when the file still has that header, then the name. A header the file does not have is an ImportError.
+export function resolveColumns(table: string[][], saved: ColumnPick = {}, picked: ColumnPick = {}): Columns {
+  const header = (table[0] ?? []).map((name) => name.trim());
+  const find = (name: string): number => header.findIndex((h) => h !== '' && sameHeader(h, name));
+  const index = {} as Record<ColumnField, number>;
+  for (const spec of FIELDS) {
+    let i = -1;
+    if (Object.hasOwn(picked, spec.key)) {
+      const want = picked[spec.key];
+      if (want) {
+        i = find(want);
+        if (i < 0) throw new ImportError(`This file has no column named "${want}".`);
+      }
+    } else {
+      const was = saved[spec.key];
+      if (was) i = find(was);
+      if (i < 0) i = header.findIndex((h) => h !== '' && spec.names.includes(letters(h)));
+    }
+    index[spec.key] = i;
+  }
+  const used = new Map<number, string>();
+  for (const spec of FIELDS) {
+    const i = index[spec.key];
+    const other = used.get(i);
+    if (i >= 0 && other !== undefined) throw new ImportError(`The column "${header[i]}" is used for both ${other} and ${spec.label}.`);
+    if (i >= 0) used.set(i, spec.label);
+  }
+  const first = table[1] ?? [];
+  const headers: string[] = [];
+  const sample: string[] = [];
+  header.forEach((h, i) => {
+    if (h === '' || headers.some((x) => sameHeader(x, h))) return;
+    headers.push(h);
+    sample.push((first[i] ?? '').trim());
+  });
+  const choices: ColumnChoice[] = FIELDS.map((spec) => ({
+    field: spec.key,
+    label: spec.label,
+    required: spec.required,
+    header: index[spec.key] >= 0 ? (header[index[spec.key] ?? -1] ?? null) : null,
+  }));
+  return { index, map: { headers, sample, choices, ready: choices.every((c) => !c.required || c.header !== null) } };
+}
+
+// The columns of a file and how they would be matched, without reading the rows.
+export function describeColumns(text: string, saved: ColumnPick = {}, picked: ColumnPick = {}): ColumnMap {
+  const table = parseCsv(text);
+  if (table.length === 0) throw new ImportError('The file is empty.');
+  return resolveColumns(table, saved, picked).map;
+}
 
 export interface IncomingPerson {
   key: string;
@@ -38,6 +119,7 @@ export interface Sheet {
   skippedInvalid: number;
   duplicates: number;
   warnings: string[];
+  columns: ColumnMap;
 }
 
 // RFC 4180 CSV: quoted fields, doubled quotes, newlines inside quotes. The delimiter is a comma, or a tab when the header line has
@@ -163,25 +245,23 @@ export function parseSheetDate(raw: string): string | null {
   return t.toISOString().slice(0, 10);
 }
 
-// Reads the sheet. Throws an ImportError, listing every problem, when a required column is missing or no row is usable.
-export function readSheet(text: string): Sheet {
+// Reads the sheet. Throws an ImportError, listing every problem, when a required column is missing or no row is usable. `saved` and
+// `picked` say which column feeds which field (see resolveColumns).
+export function readSheet(text: string, saved: ColumnPick = {}, picked: ColumnPick = {}): Sheet {
   const table = parseCsv(text);
   const header = table[0];
   if (!header) throw new ImportError('The file is empty.');
-  const columns = new Map<string, number>();
-  header.forEach((name, i) => {
-    const key = name.trim().toUpperCase();
-    if (key !== '' && !columns.has(key)) columns.set(key, i);
-  });
-  const missing = REQUIRED.filter((name) => !columns.has(name));
+  const { index, map: columns } = resolveColumns(table, saved, picked);
+  const missing = FIELDS.filter((f) => f.required && index[f.key] < 0);
   if (missing.length > 0) {
-    throw new ImportError(`The first row is missing the column${missing.length > 1 ? 's' : ''} ${missing.join(', ')}.`, [
-      `Columns found: ${[...columns.keys()].join(', ') || 'none'}`,
-    ]);
+    throw new ImportError(
+      `The first row is missing the column${missing.length > 1 ? 's' : ''} ${missing.map((f) => f.names[0]).join(', ')}.`,
+      [`Columns found: ${columns.headers.join(', ') || 'none'}`, 'If the state renamed a column, choose it in the column list.'],
+    );
   }
-  const at = (row: string[], name: string): string => {
-    const i = columns.get(name);
-    return i === undefined ? '' : (row[i] ?? '').trim();
+  const at = (row: string[], field: ColumnField): string => {
+    const i = index[field];
+    return i < 0 ? '' : (row[i] ?? '').trim();
   };
 
   const people = new Map<string, IncomingPerson>();
@@ -190,36 +270,36 @@ export function readSheet(text: string): Sheet {
   let duplicates = 0;
   let badDates = 0;
   for (const row of table.slice(1)) {
-    const legdist = at(row, 'LEGDIST');
+    const legdist = at(row, 'legdist');
     // A blank LEGDIST is taken as LD8: the file is the LD8 tab. Anything with a number other than 8 is not ours.
     if (legdist !== '' && Number.parseInt(legdist.replace(/\D/g, ''), 10) !== 8) {
       skippedOtherDistrict++;
       continue;
     }
-    const firstName = at(row, 'FIRST');
-    const lastName = at(row, 'LAST');
-    const address = at(row, 'ADDRESS');
+    const firstName = at(row, 'first');
+    const lastName = at(row, 'last');
+    const address = at(row, 'address');
     if (firstName === '' || lastName === '' || address === '') {
       skippedInvalid++;
       continue;
     }
-    const rawDate = at(row, 'STATUSDATE');
+    const rawDate = at(row, 'statusDate');
     const statusDate = parseSheetDate(rawDate);
     if (rawDate !== '' && statusDate === null) badDates++;
     const { city, zip } = splitAddress(address);
     const person: IncomingPerson = {
       key: normalizeKey(firstName, lastName, address),
       firstName,
-      middleName: at(row, 'MID'),
+      middleName: at(row, 'middle'),
       lastName,
-      party: at(row, 'PARTY'),
+      party: at(row, 'party'),
       legdist,
-      reasonCode: at(row, 'REASONCODE'),
-      phone: at(row, 'PHONE'),
+      reasonCode: at(row, 'reasonCode'),
+      phone: at(row, 'phone'),
       address,
       city,
       zip,
-      precinct: at(row, 'PRECINCT_NAME'),
+      precinct: at(row, 'precinct'),
       statusDate,
     };
     const seen = people.get(person.key);
@@ -244,8 +324,20 @@ export function readSheet(text: string): Sheet {
   if (badDates > 0) warnings.push(`${badDates} status date${badDates > 1 ? 's' : ''} could not be read and were left blank.`);
   const noCity = list.filter((p) => p.city === '').length;
   if (noCity > 0) warnings.push(`${noCity} address${noCity > 1 ? 'es' : ''} had no city this tool recognizes, so the city is blank.`);
-  if (!columns.has('STATUSDATE')) warnings.push('There is no STATUSDATE column, so days uncured will be blank.');
-  return { people: list, rows: table.length - 1, skippedOtherDistrict, skippedInvalid, duplicates, warnings };
+  // Say what is blank because the file has no such column. The middle name is not worth a warning.
+  const blank: Partial<Record<ColumnField, string>> = {
+    statusDate: 'days uncured will be blank',
+    legdist: 'every row is taken as LD8',
+    party: 'party will be blank',
+    reasonCode: 'the reason will be blank',
+    phone: 'phone numbers will be blank',
+    precinct: 'precincts will be blank',
+  };
+  for (const c of columns.choices) {
+    const effect = blank[c.field];
+    if (c.header === null && effect !== undefined) warnings.push(`No column is matched to ${c.label.toLowerCase()}, so ${effect}.`);
+  }
+  return { people: list, rows: table.length - 1, skippedOtherDistrict, skippedInvalid, duplicates, warnings, columns };
 }
 
 // A person as the database has them: what planUpload needs to tell a changed person from an unchanged one, so an upload writes only the first.

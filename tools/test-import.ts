@@ -1,6 +1,7 @@
 // Checks worker/import.ts: reading the state's sheet and planning an upload. Pure functions, no database.
 import assert from 'node:assert/strict';
 import {
+  describeColumns,
   type ExistingPerson,
   ImportError,
   normalizeKey,
@@ -8,6 +9,7 @@ import {
   parseSheetDate,
   planUpload,
   readSheet,
+  resolveColumns,
   splitAddress,
 } from '../worker/import.ts';
 import { sheetCsv } from './lib/sheet.ts';
@@ -92,7 +94,7 @@ assert.equal(ana.phone, '602-555-0101');
 // The columns on the real sheets vary: only FIRST, LAST and ADDRESS are needed, in any order, in any case, with extra columns.
 const odd = readSheet('Address,extra,last,first\n"1 E MAIN ST TEMPE, AZ 85281",x,Ray,Bo\n');
 assert.equal(odd.people.length, 1);
-assert.ok(odd.warnings.some((w) => w.includes('STATUSDATE')));
+assert.ok(odd.warnings.some((w) => /status date/.test(w)));
 
 assert.throws(
   () => readSheet('FIRST,LAST\nA,B\n'),
@@ -235,5 +237,50 @@ const GRACE = 1;
   );
   assert.deepEqual(moved.cures, [1]);
 }
+
+// --- columns: matched by name wherever they are, with the admin's choice, then the saved one, then the name deciding
+const shuffled = readSheet(
+  'Precinct Name,LAST,Phone Number,first name,Address,Status Date\nNORTH,Ray,602-555-0100,Bo,1 E MAIN ST TEMPE AZ 85281,10/21/2026\n',
+);
+assert.equal(shuffled.people[0]?.firstName, 'Bo', 'a renamed column is found by its name');
+assert.equal(shuffled.people[0]?.precinct, 'NORTH', 'case, spaces and underscores do not matter');
+assert.equal(shuffled.people[0]?.phone, '602-555-0100');
+assert.equal(shuffled.people[0]?.statusDate, '2026-10-21');
+assert.ok(
+  shuffled.warnings.some((w) => /party/.test(w)),
+  'a missing optional column is said out loud',
+);
+assert.ok(!shuffled.warnings.some((w) => /middle/.test(w)), 'except the middle name');
+assert.equal(shuffled.columns.ready, true);
+assert.equal(shuffled.columns.choices.find((c) => c.field === 'precinct')?.header, 'Precinct Name');
+
+const odder = 'NAME1,NAME2,STREET,AREA\nBo,Ray,1 E MAIN ST TEMPE AZ 85281,NORTH\n';
+assert.throws(() => readSheet(odder), ImportError, 'unknown headers are not guessed');
+const mapped = readSheet(odder, {}, { first: 'NAME1', last: 'NAME2', address: 'STREET', precinct: 'AREA' });
+assert.deepEqual(
+  [mapped.people[0]?.firstName, mapped.people[0]?.lastName, mapped.people[0]?.precinct],
+  ['Bo', 'Ray', 'NORTH'],
+  'an admin can match them',
+);
+const fromSaved = readSheet(odder, { first: 'name1', last: 'NAME2', address: 'STREET' });
+assert.equal(fromSaved.people[0]?.firstName, 'Bo', 'a saved choice is used while the file has that header');
+const savedGone = readSheet('FIRST,LAST,ADDRESS\nBo,Ray,1 E MAIN ST TEMPE AZ 85281\n', { first: 'NAME1' });
+assert.equal(savedGone.people[0]?.firstName, 'Bo', 'a saved header the file lacks falls back to the name');
+const picked = readSheet('FIRST,LAST,ADDRESS,PHONE\nBo,Ray,1 E MAIN ST TEMPE AZ 85281,602-555-0100\n', {}, { phone: null });
+assert.equal(picked.people[0]?.phone, '', 'an admin can say a field has no column');
+assert.throws(() => readSheet('FIRST,LAST,ADDRESS\nA,B,C\n', {}, { phone: 'NOPE' }), /no column named "NOPE"/);
+assert.throws(() => readSheet('FIRST,LAST,ADDRESS\nA,B,C\n', {}, { last: 'FIRST' }), /used for both/, 'one column cannot feed two fields');
+const missing = describeColumns('A,B\n1,2\n');
+assert.equal(missing.ready, false);
+assert.deepEqual(missing.headers, ['A', 'B']);
+assert.deepEqual(missing.sample, ['1', '2'], 'the first row shows what is in each column');
+assert.deepEqual(
+  resolveColumns([
+    ['x', 'X', '', 'y'],
+    ['1', '2', '3', '4'],
+  ]).map.headers,
+  ['x', 'y'],
+  'a repeated or blank header is listed once or not at all',
+);
 
 console.log('test-import: ok');

@@ -235,7 +235,28 @@ try {
   await admin.getByLabel('CSV file').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from('NAME,CITY\nA,B\n') });
   await admin.getByRole('button', { name: 'Check the file' }).click();
   await admin.getByText(/missing the columns FIRST, LAST, ADDRESS/).waitFor();
+  // The file's columns are shown, open, so the admin can say which is which.
+  await admin.getByText(/Columns: 0 of 10 matched/).waitFor();
   await check(admin, 'admin bad upload');
+
+  // A sheet whose first and last name columns are renamed reads once the admin matches them.
+  const renamed = sheetCsv([{ first: 'Rae', last: 'Roe', address: '7 W NEW ST TEMPE, AZ 85281' }]).replace(
+    'FIRST,MID,LAST',
+    'Given,MID,Family',
+  );
+  await admin.getByLabel('CSV file').setInputFiles({ name: 'renamed.csv', mimeType: 'text/csv', buffer: Buffer.from(renamed) });
+  await admin.getByRole('button', { name: 'Check the file', exact: true }).click();
+  await admin.getByText(/missing the columns FIRST, LAST/).waitFor();
+  await admin.getByLabel('First name (needed)').selectOption('Given');
+  await admin.getByLabel('Last name (needed)').selectOption('Family');
+  await admin.getByRole('button', { name: 'Check the file again' }).click();
+  await admin.getByText('Become cured').waitFor();
+  expect(
+    'admin columns',
+    /^New people1/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    'the matched columns did not read',
+  );
+  await check(admin, 'admin columns matched');
 
   // Find someone and move them; the audit log shows it.
   await admin.getByLabel('Name, street or phone').fill('newman');

@@ -20,7 +20,7 @@ A volunteer can never set Cured: only the state's data can verify it. Claims do 
 
 ## The sheet
 
-The admin exports the LD8 tab of the state's workbook as CSV. Columns are matched by name, case-insensitively, in any order, and extra columns are ignored. `FIRST`, `LAST` and `ADDRESS` are required; `MID`, `STATUSDATE`, `PARTY`, `LEGDIST`, `REASONCODE`, `PHONE` and `PRECINCT_NAME` are used when present. The delimiter is a comma, or a tab for a sheet pasted as text.
+The admin exports the LD8 tab of the state's workbook as CSV. Columns are matched by name, in any order, ignoring case and anything that is not a letter or digit (`Precinct Name` and `PRECINCT_NAME` are the same), and extra columns are ignored. `FIRST`, `LAST` and `ADDRESS` are required (also `FIRST NAME`, `LAST NAME`, `RESIDENCE ADDRESS`); `MID`, `STATUSDATE`, `PARTY`, `LEGDIST`, `REASONCODE`, `PHONE` and `PRECINCT_NAME` are used when present, and a warning says what is blank when one is missing. When the state renames a column, the upload page lists the file's columns with a select for each field, with an example value from the first row, so the admin can say which is which. What an upload used is saved (the `column_map` setting) and is the starting point for the next one while the file still has that header; the upload's audit row records it. The delimiter is a comma, or a tab for a sheet pasted as text.
 
 - Rows with a `LEGDIST` other than 8 are skipped (a blank `LEGDIST` is taken as 8).
 - The sheet has no voter id, so **a person is their normalized first name, last name and address** (case, punctuation, accents and the middle name do not count). `normalizeKey` in `worker/import.ts` is the one place to change that.

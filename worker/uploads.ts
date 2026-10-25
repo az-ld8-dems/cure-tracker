@@ -1,8 +1,8 @@
 // Applies the state's sheet to the database: a preview that changes nothing, and the upload itself, which writes everything in one
 // batch (D1 runs a batch as a transaction), so a failed upload leaves no trace. The rules are in import.ts. Only erasable TypeScript.
-import type { UploadPreview, UploadRecord } from '../src/api.d.ts';
+import type { ColumnMap, ColumnPick, UploadPreview, UploadRecord } from '../src/api.d.ts';
 import type { Db, Stmt } from './db.ts';
-import { type ExistingPerson, MATCH_LIMIT, type Plan, planUpload, readSheet, type Sheet } from './import.ts';
+import { describeColumns, type ExistingPerson, FIELDS, MATCH_LIMIT, type Plan, planUpload, readSheet, type Sheet } from './import.ts';
 
 // Rows per statement. Each row is sent as JSON inside one bound parameter and unpacked by SQLite (json_each), which keeps an upload
 // to a handful of statements however long the sheet is.
@@ -94,6 +94,7 @@ function previewOf(sheet: Sheet, plan: Plan): UploadPreview {
     possibleMatches: plan.possibleMatches.slice(0, MATCH_LIMIT),
     possibleMatchCount: plan.possibleMatches.length,
     cities: [...cities].map(([city, count]) => ({ city, count })).sort((a, b) => b.count - a.count || a.city.localeCompare(b.city)),
+    columns: sheet.columns,
   };
 }
 
@@ -153,14 +154,37 @@ export async function graceCycles(db: Db): Promise<number> {
   return Number.isSafeInteger(n) && n >= 0 && n <= MAX_GRACE_CYCLES ? n : DEFAULT_GRACE_CYCLES;
 }
 
-async function prepare(db: Db, csv: string, now: string) {
-  const sheet = readSheet(csv);
+// Which header of the sheet fed each field the last time an admin uploaded one. A header the file no longer has is ignored.
+export async function savedColumns(db: Db): Promise<ColumnPick> {
+  const row = await db.prepare("SELECT value FROM settings WHERE key = 'column_map'").first<{ value: string }>();
+  let raw: unknown = null;
+  try {
+    raw = row ? JSON.parse(row.value) : null;
+  } catch {
+    // A damaged setting is the same as none.
+  }
+  const saved: ColumnPick = {};
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    for (const f of FIELDS) {
+      const v = (raw as Record<string, unknown>)[f.key];
+      if (typeof v === 'string' && v !== '') saved[f.key] = v;
+    }
+  }
+  return saved;
+}
+
+export async function columnsOf(db: Db, csv: string, picked: ColumnPick = {}): Promise<ColumnMap> {
+  return describeColumns(csv, await savedColumns(db), picked);
+}
+
+async function prepare(db: Db, csv: string, now: string, picked: ColumnPick) {
+  const sheet = readSheet(csv, await savedColumns(db), picked);
   const plan = planUpload(sheet.people, await loadExisting(db), now, await graceCycles(db));
   return { sheet, plan };
 }
 
-export async function previewUpload(db: Db, csv: string, now: string): Promise<UploadPreview> {
-  const { sheet, plan } = await prepare(db, csv, now);
+export async function previewUpload(db: Db, csv: string, now: string, picked: ColumnPick = {}): Promise<UploadPreview> {
+  const { sheet, plan } = await prepare(db, csv, now, picked);
   return previewOf(sheet, plan);
 }
 
@@ -173,11 +197,13 @@ export interface ApplyOptions {
   filename: string;
   // Needed when the preview said the file looks partial.
   force: boolean;
+  // The columns the admin chose for this file, if they chose any.
+  columns?: ColumnPick;
 }
 
 export async function applyUpload(db: Db, csv: string, options: ApplyOptions): Promise<UploadPreview & { id: number }> {
-  const { now, actor, filename, force } = options;
-  const { sheet, plan } = await prepare(db, csv, now);
+  const { now, actor, filename, force, columns } = options;
+  const { sheet, plan } = await prepare(db, csv, now, columns ?? {});
   const preview = previewOf(sheet, plan);
   if (plan.looksPartial && !force) throw new PartialUploadError(preview.warnings.join(' '));
   const last = await db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM uploads').first<{ id: number }>();
@@ -265,6 +291,15 @@ export async function applyUpload(db: Db, csv: string, options: ApplyOptions): P
   // Everyone on the sheet is open now, so the filters offer what the sheet has.
   statements.push(saveFacets(db, facetsOf(sheet.people)));
 
+  // The columns this upload read are what the next one starts from.
+  const used: ColumnPick = {};
+  for (const c of sheet.columns.choices) if (c.header !== null) used[c.field] = c.header;
+  statements.push(
+    db
+      .prepare("INSERT INTO settings (key, value) VALUES ('column_map', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+      .bind(JSON.stringify(used)),
+  );
+
   // The log gets one row for the upload and one for each person the upload cured, flagged or reopened.
   const audit = [
     ...plan.audit.map((a) => ({ id: a.personId, action: a.action, detail: JSON.stringify(a.detail) })),
@@ -293,6 +328,7 @@ export async function applyUpload(db: Db, csv: string, options: ApplyOptions): P
         cured: preview.cured,
         stillUncured: preview.stillUncured,
         reappeared: preview.reappeared,
+        columns: used,
       }),
     ),
   );
