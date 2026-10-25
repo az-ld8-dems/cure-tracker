@@ -4,7 +4,7 @@
 // nothing however large the sheet. The upload applies everything in one batch (D1 runs a batch as a transaction), so a failed upload
 // leaves no trace. tools/lib/plan.ts is the same rules written as plain functions, and tools/test-upload-sql.ts holds the two to the
 // same answer. Only erasable TypeScript.
-import type { ColumnPick, PossibleMatch, StageStart, StageStarted, UploadPreview, UploadRecord } from '../src/api.d.ts';
+import type { ColumnPick, MergePair, PossibleMatch, StageStart, StageStarted, UploadPreview, UploadRecord } from '../src/api.d.ts';
 import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt } from './db.ts';
@@ -127,6 +127,7 @@ export async function startStage(db: Db, actor: string, now: string, start: Stag
   const token = crypto.randomUUID();
   await db.batch([
     db.prepare('DELETE FROM upload_rows'),
+    db.prepare('DELETE FROM upload_merges'),
     db
       .prepare(
         `INSERT OR REPLACE INTO upload_stage
@@ -175,8 +176,44 @@ export async function stageRows(db: Db, token: string, rows: IncomingPerson[]): 
   return rows.length;
 }
 
-// Is a person on the sheet? (p is a row of people.)
-const ON_SHEET = 'EXISTS (SELECT 1 FROM upload_rows s WHERE s.key = p.key)';
+// Thrown when a merge names two people who are not a possible match.
+export class MergeError extends Error {}
+
+// Marks pairs (an existing person, a person on the sheet) as the same person, replacing any earlier marks. Each existing person and each
+// person on the sheet may be in one pair, and each pair must be what the list offers: someone who disappeared from the sheet, a person
+// on it nobody has, and the same last name and address, the same first name and address, or the same name. Changes no one yet.
+export async function setMerges(db: Db, token: string, pairs: MergePair[]): Promise<number> {
+  await readStage(db, token);
+  if (new Set(pairs.map((m) => m.id)).size !== pairs.length || new Set(pairs.map((m) => m.key)).size !== pairs.length)
+    throw new MergeError('A person can be in one pair only.');
+  const offered = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM json_each(?1) j
+       JOIN people p ON p.id = json_extract(j.value, '$.id')
+       JOIN upload_rows s ON s.key = json_extract(j.value, '$.key')
+       WHERE p.status != 'cured' AND NOT ${RAW_ON_SHEET} AND NOT EXISTS (SELECT 1 FROM people q WHERE q.key = s.key)
+         AND ${LOOKS_THE_SAME('p', 's')}`,
+    )
+    .bind(JSON.stringify(pairs))
+    .first<{ n: number }>();
+  if ((offered?.n ?? 0) !== pairs.length) throw new MergeError('Some of those are not possible matches (any more). Check the file again.');
+  await db.batch([
+    db.prepare('DELETE FROM upload_merges'),
+    db
+      .prepare(
+        "INSERT INTO upload_merges (person_id, new_key) SELECT json_extract(value, '$.id'), json_extract(value, '$.key') FROM json_each(?1)",
+      )
+      .bind(JSON.stringify(pairs)),
+  ]);
+  return pairs.length;
+}
+
+// The key a person has for this upload: their own, or the one an admin merged them into (upload_merges). `p` names a row of people.
+const KEY_OF = (p: string) => `COALESCE((SELECT m.new_key FROM upload_merges m WHERE m.person_id = ${p}.id), ${p}.key)`;
+// Is a person on the sheet, counting a merge as being on it?
+const ON_SHEET = `EXISTS (SELECT 1 FROM upload_rows s WHERE s.key = ${KEY_OF('p')})`;
+// The same, by the person's own key only.
+const RAW_ON_SHEET = 'EXISTS (SELECT 1 FROM upload_rows s WHERE s.key = p.key)';
 
 interface Counts {
   staged: number;
@@ -186,6 +223,7 @@ interface Counts {
   reappeared: number;
   still_uncured: number;
   open_before: number;
+  merges: number;
 }
 
 // What the sheet would do, counted without changing anything. `grace` is the admins' setting.
@@ -194,12 +232,14 @@ async function countChanges(db: Db, grace: number): Promise<Counts> {
     .prepare(
       `SELECT
          (SELECT COUNT(*) FROM upload_rows) AS staged,
-         (SELECT COUNT(*) FROM upload_rows s WHERE NOT EXISTS (SELECT 1 FROM people p WHERE p.key = s.key)) AS added,
+         (SELECT COUNT(*) FROM upload_rows s WHERE NOT EXISTS (SELECT 1 FROM people p WHERE p.key = s.key)
+            AND NOT EXISTS (SELECT 1 FROM upload_merges m WHERE m.new_key = s.key)) AS added,
          (SELECT COUNT(*) FROM people p WHERE ${ON_SHEET}) AS known,
          (SELECT COUNT(*) FROM people p WHERE p.status != 'cured' AND NOT ${ON_SHEET}) AS cured,
          (SELECT COUNT(*) FROM people p WHERE p.status = 'cured' AND ${ON_SHEET}) AS reappeared,
          (SELECT COUNT(*) FROM people p WHERE p.status = 'contacted' AND p.contacted_cycles + 1 > ?1 AND ${ON_SHEET}) AS still_uncured,
-         (SELECT COUNT(*) FROM people WHERE status != 'cured') AS open_before`,
+         (SELECT COUNT(*) FROM people WHERE status != 'cured') AS open_before,
+         (SELECT COUNT(*) FROM upload_merges) AS merges`,
     )
     .bind(grace)
     .first<Counts>();
@@ -207,53 +247,91 @@ async function countChanges(db: Db, grace: number): Promise<Counts> {
   return row;
 }
 
-// A key is "first|last|address", each part with only letters, digits and spaces. These cut out "last|address" and "first|last".
-const LAST_ADDRESS = (key: string) => `substr(${key}, instr(${key}, '|') + 1)`;
-const FIRST_LAST = (key: string) => `substr(${key}, 1, instr(${key}, '|') + instr(${LAST_ADDRESS(key)}, '|') - 1)`;
+// A key is "first|last|address", each part with only letters, digits and spaces. These cut it up.
+const AFTER_FIRST = (key: string) => `substr(${key}, instr(${key}, '|') + 1)`;
+const FIRST = (key: string) => `substr(${key}, 1, instr(${key}, '|') - 1)`;
+const ADDRESS = (key: string) => `substr(${AFTER_FIRST(key)}, instr(${AFTER_FIRST(key)}, '|') + 1)`;
+const LAST_ADDRESS = AFTER_FIRST;
+const FIRST_LAST = (key: string) => `substr(${key}, 1, instr(${key}, '|') + instr(${AFTER_FIRST(key)}, '|') - 1)`;
+const FIRST_ADDRESS = (key: string) => `${FIRST(key)} || '|' || ${ADDRESS(key)}`;
+
+// Is the person p one who might be the person s on the sheet, a record that was corrected? (Same last name and address, same first name
+// and address, or same name at another address.)
+const LOOKS_THE_SAME = (p: string, s: string) =>
+  `(${LAST_ADDRESS(`${p}.key`)} = ${LAST_ADDRESS(`${s}.key`)} OR ${FIRST_LAST(`${p}.key`)} = ${FIRST_LAST(`${s}.key`)}
+    OR ${FIRST_ADDRESS(`${p}.key`)} = ${FIRST_ADDRESS(`${s}.key`)})`;
 
 // Someone who disappears while a similar person appears may be one person whose record was corrected, who would otherwise be cured and
-// re-added as a stranger (losing their notes and volunteer). Only reported; nothing is merged.
+// re-added as a stranger (losing their notes and volunteer). These are listed, by the keys as they are, whether or not an admin has
+// marked them as the same person (merged); a merge is what changes the upload.
 const MATCHES = `
   WITH gone AS MATERIALIZED (
-    SELECT p.id, p.first_name, p.last_name, p.address, ${LAST_ADDRESS('p.key')} AS last_address, ${FIRST_LAST('p.key')} AS first_last
-    FROM people p WHERE p.status != 'cured' AND NOT ${ON_SHEET}),
+    SELECT p.id, p.first_name, p.last_name, p.address, ${LAST_ADDRESS('p.key')} AS last_address, ${FIRST_LAST('p.key')} AS first_last,
+      ${FIRST_ADDRESS('p.key')} AS first_address
+    FROM people p WHERE p.status != 'cured' AND NOT ${RAW_ON_SHEET}),
   fresh AS MATERIALIZED (
-    SELECT s.first_name, s.last_name, s.address, ${LAST_ADDRESS('s.key')} AS last_address, ${FIRST_LAST('s.key')} AS first_last
+    SELECT s.key, s.first_name, s.last_name, s.address, ${LAST_ADDRESS('s.key')} AS last_address, ${FIRST_LAST('s.key')} AS first_last,
+      ${FIRST_ADDRESS('s.key')} AS first_address
     FROM upload_rows s WHERE NOT EXISTS (SELECT 1 FROM people p WHERE p.key = s.key)),
   found AS (
-    SELECT 'address' AS kind, g.id, g.first_name || ' ' || g.last_name AS existing_name, g.address AS existing_address,
+    SELECT 'address' AS kind, g.id, g.first_name || ' ' || g.last_name AS existing_name, g.address AS existing_address, f.key AS incoming_key,
       f.first_name || ' ' || f.last_name AS incoming_name, f.address AS incoming_address
     FROM fresh f JOIN gone g ON g.last_address = f.last_address
     UNION ALL
-    SELECT 'moved', g.id, g.first_name || ' ' || g.last_name, g.address, f.first_name || ' ' || f.last_name, f.address
-    FROM fresh f JOIN gone g ON g.first_last = f.first_last)`;
+    SELECT 'surname', g.id, g.first_name || ' ' || g.last_name, g.address, f.key, f.first_name || ' ' || f.last_name, f.address
+    FROM fresh f JOIN gone g ON g.first_address = f.first_address
+    UNION ALL
+    SELECT 'moved', g.id, g.first_name || ' ' || g.last_name, g.address, f.key, f.first_name || ' ' || f.last_name, f.address
+    FROM fresh f JOIN gone g ON g.first_last = f.first_last),
+  listed AS (
+    SELECT found.*, EXISTS (SELECT 1 FROM upload_merges m WHERE m.person_id = found.id AND m.new_key = found.incoming_key) AS merged FROM found)`;
 
 interface MatchRow {
   kind: PossibleMatch['kind'];
   id: number;
   existing_name: string;
   existing_address: string;
+  incoming_key: string;
   incoming_name: string;
   incoming_address: string;
+  merged: number;
 }
 
-async function findMatches(db: Db, counts: Counts): Promise<{ matches: PossibleMatch[]; count: number; skipped: boolean }> {
-  if (counts.cured === 0 || counts.added === 0) return { matches: [], count: 0, skipped: false };
-  if (counts.cured * counts.added > MATCH_PAIRS_LIMIT) return { matches: [], count: 0, skipped: true };
-  const total = await db.prepare(`${MATCHES} SELECT COUNT(*) AS n FROM found`).first<{ n: number }>();
-  const { results } = await db.prepare(`${MATCHES} SELECT * FROM found LIMIT ?1`).bind(MATCH_LIMIT).all<MatchRow>();
+interface Found {
+  matches: PossibleMatch[];
+  // All the pairs, and how many of them nobody has marked as the same person yet.
+  count: number;
+  unresolved: number;
+  skipped: boolean;
+}
+
+async function findMatches(db: Db, counts: Counts): Promise<Found> {
+  // Counted as they are, before any merge: a merged person is no longer "gone" in `counts`, but is still in the list.
+  const gone = counts.cured + counts.merges;
+  const fresh = counts.added + counts.merges;
+  if (gone === 0 || fresh === 0) return { matches: [], count: 0, unresolved: 0, skipped: false };
+  if (gone * fresh > MATCH_PAIRS_LIMIT) return { matches: [], count: 0, unresolved: 0, skipped: true };
+  const total = await db
+    .prepare(`${MATCHES} SELECT COUNT(*) AS n, COALESCE(SUM(NOT merged), 0) AS open FROM listed`)
+    .first<{ n: number; open: number }>();
+  const { results } = await db
+    .prepare(`${MATCHES} SELECT * FROM listed ORDER BY id, incoming_key, kind LIMIT ?1`)
+    .bind(MATCH_LIMIT)
+    .all<MatchRow>();
   return {
     count: total?.n ?? 0,
+    unresolved: total?.open ?? 0,
     skipped: false,
     matches: results.map((r) => ({
       kind: r.kind,
       existing: { id: r.id, name: r.existing_name, address: r.existing_address },
-      incoming: { name: r.incoming_name, address: r.incoming_address },
+      incoming: { key: r.incoming_key, name: r.incoming_name, address: r.incoming_address },
+      merged: r.merged === 1,
     })),
   };
 }
 
-function previewOf(stage: StageRow, counts: Counts, found: Awaited<ReturnType<typeof findMatches>>): UploadPreview {
+function previewOf(stage: StageRow, counts: Counts, found: Found): UploadPreview {
   const looksPartial = counts.open_before >= 10 && counts.cured > counts.open_before / 2;
   const warnings: string[] = JSON.parse(stage.warnings);
   if (looksPartial) {
@@ -261,9 +339,9 @@ function previewOf(stage: StageRow, counts: Counts, found: Awaited<ReturnType<ty
       `This file would cure ${counts.cured} of the ${counts.open_before} people still open. That looks like a partial export, not a day of progress.`,
     );
   }
-  if (found.count > 0) {
+  if (found.unresolved > 0) {
     warnings.push(
-      `${found.count} new ${found.count > 1 ? 'people look' : 'person looks'} like someone who disappeared from the sheet (a corrected name or a move). Check the list below.`,
+      `${found.unresolved} new ${found.unresolved > 1 ? 'people look' : 'person looks'} like someone who disappeared from the sheet (a corrected name or a move). Check the list below.`,
     );
   }
   if (found.skipped) warnings.push('So many people changed that this check did not look for corrected names.');
@@ -375,19 +453,30 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
          SELECT ?1, ?2, 'import.cured', p.id, json_object('upload', ?3) FROM people p WHERE p.status != 'cured' AND NOT ${ON_SHEET}`,
       )
       .bind(now, actor, id),
-    // Known people: details refreshed from the sheet, and the contact status moved on as above.
+    // A person an admin marked as the same as someone on the sheet keeps their record, notes and volunteer: the log says who they were.
+    db
+      .prepare(
+        `INSERT INTO audit (at, actor, action, person_id, detail)
+         SELECT ?1, ?2, 'import.merged', p.id, json_object('upload', ?3,
+           'was', json_object('name', p.first_name || ' ' || p.last_name, 'address', p.address),
+           'now', json_object('name', s.first_name || ' ' || s.last_name, 'address', s.address))
+         FROM upload_merges m JOIN people p ON p.id = m.person_id JOIN upload_rows s ON s.key = m.new_key`,
+      )
+      .bind(now, actor, id),
+    // Known people: details refreshed from the sheet, and the contact status moved on as above. A merged person is re-keyed to the
+    // sheet's key, so everything after this sees them as the person they now are.
     db
       .prepare(
         `UPDATE people SET
-           ${fields.map((f) => `${f} = s.${f}`).join(', ')}, status_date = s.status_date,
+           key = s.key, ${fields.map((f) => `${f} = s.${f}`).join(', ')}, status_date = s.status_date,
            status = CASE WHEN people.status = 'cured' OR (${exceeded}) THEN 'needs_contact' ELSE people.status END,
            flag = CASE WHEN people.status = 'cured' THEN 'reappeared' WHEN ${exceeded} THEN 'still_uncured' ELSE people.flag END,
            status_changed_at = CASE WHEN people.status = 'cured' OR (${exceeded}) THEN ?2 ELSE people.status_changed_at END,
            contacted_cycles = CASE WHEN people.status = 'contacted' AND NOT (${exceeded}) THEN people.contacted_cycles + 1 ELSE 0 END,
            cured_at = NULL, last_upload_id = ?3, updated_at = ?2
          FROM upload_rows s
-         WHERE people.key = s.key
-           AND (people.status IN ('cured', 'contacted') OR people.contacted_cycles != 0
+         WHERE s.key = ${KEY_OF('people')}
+           AND (people.status IN ('cured', 'contacted') OR people.contacted_cycles != 0 OR people.key != s.key
                 OR ${[...fields, 'status_date'].map((f) => `people.${f} IS NOT s.${f}`).join(' OR ')})`,
       )
       .bind(grace, now, id),
@@ -434,6 +523,7 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
       }),
     ),
     db.prepare('DELETE FROM upload_rows'),
+    db.prepare('DELETE FROM upload_merges'),
     db.prepare('DELETE FROM upload_stage'),
   ];
   await db.batch(statements);

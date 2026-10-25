@@ -121,10 +121,20 @@ export interface AdminStats {
 }
 
 export interface PossibleMatch {
-  // address: the same last name at the same address with another first name. moved: the same name at another address.
-  kind: 'address' | 'moved';
+  // address: the same last name at the same address with another first name. surname: the same first name at the same address with
+  // another last name. moved: the same name at another address.
+  kind: 'address' | 'surname' | 'moved';
   existing: { id: number; name: string; address: string };
-  incoming: { name: string; address: string };
+  // `key` names the person on the sheet when asking for a merge.
+  incoming: { key: string; name: string; address: string };
+  // Whether the admin has marked them as the same person: the upload then updates the existing record instead of curing it and adding
+  // the new one.
+  merged: boolean;
+}
+
+export interface MergePair {
+  id: number;
+  key: string;
 }
 
 // The columns of the state's sheet that the importer reads. `header` is the column of the file used for the field, or null when the file

@@ -41,7 +41,7 @@ The admin picks the file and presses **Check the file**. The browser reads the C
 
 Safeguards:
 - A file that would cure more than half of at least ten open people is probably a partial export. The upload is refused unless the admin ticks "Upload it anyway".
-- A new person who looks like someone who just disappeared (same last name and address with another first name, or the same name at another address) is listed as a **possible match**. Nothing is merged; the old record is cured and the new one added. An admin can reassign by hand.
+- A new person who looks like someone who just disappeared is listed as a **possible match**: the same last name and address with another first name, the same first name and address with another last name, or the same name at another address. The match is by the normalized key, not by similarity: a typo in two of the three parts, a nickname, or `ST` against `STREET` is not found. Each listed pair has a **same person** box. Ticking it (the Worker keeps the marks with the staged sheet and works the counts out again) makes the upload re-key the old record to the sheet's key and update it, instead of curing it and adding the new one as a stranger: the record keeps its id, notes, volunteer, status and history, and an `import.merged` audit row says who they were. Unticked, nothing is merged, as before.
 
 ## Start over
 

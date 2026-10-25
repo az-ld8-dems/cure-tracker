@@ -258,6 +258,33 @@ try {
   );
   await check(admin, 'admin columns matched');
 
+  // A corrected last name looks like one person gone and a stranger new. Marking them as the same person changes the counts: nobody is
+  // cured or added, and the record would be updated instead.
+  const corrected = day2.map((p) => (p.first === 'Newt' ? { ...p, last: 'Newmann' } : p));
+  await admin
+    .getByLabel('CSV file')
+    .setInputFiles({ name: 'corrected.csv', mimeType: 'text/csv', buffer: Buffer.from(sheetCsv(corrected)) });
+  await admin.getByRole('button', { name: 'Check the file', exact: true }).click();
+  await admin.getByText('Possible matches').waitFor();
+  expect(
+    'admin matches',
+    /^New people1/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    'the corrected name should look like a new person',
+  );
+  await admin.getByLabel(/Newt Newman and Newt Newmann are the same person/i).check();
+  await admin.getByText(/^New people0/).waitFor();
+  expect(
+    'admin matches',
+    /Become cured0/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    'marked as the same person, nobody is cured',
+  );
+  expect(
+    'admin matches',
+    await admin.getByLabel(/Newt Newman and Newt Newmann are the same person/i).isChecked(),
+    'the mark stays after the page is drawn again',
+  );
+  await check(admin, 'admin possible matches');
+
   // Find someone and move them; the audit log shows it.
   await admin.getByLabel('Name, street or phone').fill('newman');
   const row = admin.getByRole('row', { name: /Newt Newman/ });

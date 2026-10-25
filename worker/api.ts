@@ -9,6 +9,7 @@ import type {
   ColumnPick,
   ContactMethod,
   Me,
+  MergePair,
   Note,
   PeoplePage,
   Person,
@@ -28,11 +29,13 @@ import {
   MAX_GRACE_CYCLES,
   MAX_STAGE_PEOPLE,
   MAX_STAGE_ROWS,
+  MergeError,
   PartialUploadError,
   planStage,
   StageError,
   savedColumns,
   savedFacets,
+  setMerges,
   stageRows,
   startStage,
   uploadRecord,
@@ -619,6 +622,24 @@ function stagedRows(body: Body): IncomingPerson[] {
 
 const tokenOf = (body: Body): string => text(body, 'token', 100);
 
+// Pairs an admin marked as the same person: { id, key } each, as the possible matches list gave them.
+function mergePairs(body: Body): MergePair[] {
+  const raw = body.merges;
+  if (!Array.isArray(raw) || raw.length > 1000) throw new HttpError(400, 'merges must be a list of at most 1000 pairs');
+  return raw.map((m) => {
+    if (
+      !isObject(m) ||
+      typeof m.id !== 'number' ||
+      !Number.isSafeInteger(m.id) ||
+      typeof m.key !== 'string' ||
+      !KEY.test(m.key) ||
+      m.key.length > 1500
+    )
+      throw new HttpError(400, 'a merge is { id, key }, as the possible matches list gives them');
+    return { id: m.id, key: m.key };
+  });
+}
+
 // StageError means the upload is not the current one, or not whole: the page should start again.
 async function staged<T>(work: () => Promise<T>): Promise<T> {
   try {
@@ -640,6 +661,16 @@ async function uploadStage(c: Ctx, _p: string[], body: Body): Promise<Response> 
 async function uploadRows(c: Ctx, _p: string[], body: Body): Promise<Response> {
   const rows = stagedRows(body);
   return json({ staged: await staged(() => stageRows(c.db, tokenOf(body), rows)) });
+}
+
+async function uploadMerges(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  const pairs = mergePairs(body);
+  try {
+    return json({ merged: await staged(() => setMerges(c.db, tokenOf(body), pairs)) });
+  } catch (e) {
+    if (e instanceof MergeError) throw new HttpError(400, e.message);
+    throw e;
+  }
 }
 
 async function uploadPlan(c: Ctx, _p: string[], body: Body): Promise<Response> {
@@ -735,6 +766,7 @@ async function reset(c: Ctx, _p: string[], body: Body): Promise<Response> {
     c.db.prepare("DELETE FROM settings WHERE key = 'facets'"),
     c.db.prepare('DELETE FROM uploads'),
     c.db.prepare('DELETE FROM upload_rows'),
+    c.db.prepare('DELETE FROM upload_merges'),
     c.db.prepare('DELETE FROM upload_stage'),
     auditStmt(c, 'reset', null, deleted),
   ]);
@@ -768,6 +800,7 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/uploads\/columns$/, admin: true, handler: uploadColumns },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage$/, admin: true, handler: uploadStage },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/rows$/, admin: true, handler: uploadRows },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/merges$/, admin: true, handler: uploadMerges },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/plan$/, admin: true, handler: uploadPlan },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/finish$/, admin: true, handler: uploadFinish },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, admin: true, handler: assign },
