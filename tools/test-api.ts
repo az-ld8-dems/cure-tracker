@@ -1,23 +1,13 @@
 // Checks the Worker's request handling (worker/app.ts, api.ts, uploads.ts) on a SQLite database with the real migration: who may do
 // what, claims that cannot collide, the upload lifecycle (cured, still uncured, reappeared), the admin tools and the audit log.
 import assert from 'node:assert/strict';
-import type {
-  AdminSettings,
-  AdminStats,
-  AuditEntry,
-  ColumnMap,
-  Me,
-  PeoplePage,
-  Person,
-  PersonDetail,
-  ResetResult,
-  UploadPreview,
-  Volunteer,
-} from '../src/api.d.ts';
+import type { AdminSettings, AdminStats, AuditEntry, Me, PeoplePage, Person, PersonDetail, ResetResult, Volunteer } from '../src/api.d.ts';
+import { describeColumns, ImportError } from '../src/sheet.ts';
 import type { AccessVerifier } from '../worker/access.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { type SheetPerson, sheetCsv, syntheticPeople } from './lib/sheet.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
+import { previewCsv, type Send, uploadCsv } from './lib/upload-test.ts';
 
 // The Worker logs refusals and errors; the tests make some on purpose, so keep the log quiet and look at it when it matters.
 const logged: string[] = [];
@@ -102,8 +92,20 @@ assert.equal(
 // --- people to work with
 const base = syntheticPeople(30);
 const csv = (people: SheetPerson[]) => sheetCsv(people);
+// The upload as the admin page does it (src/upload.ts), as whoever.
+const sendAs =
+  (as: string): Send =>
+  (method, path, body) =>
+    call(as, method, path, body);
 
-assert.equal((await call(vera, 'POST', '/api/admin/uploads/preview', { csv: csv(base) })).status, 403, 'volunteers cannot upload');
+for (const [method, path] of [
+  ['GET', '/api/admin/uploads/columns'],
+  ['POST', '/api/admin/uploads/stage'],
+  ['POST', '/api/admin/uploads/stage/rows'],
+  ['POST', '/api/admin/uploads/stage/plan'],
+  ['POST', '/api/admin/uploads/stage/finish'],
+] as const)
+  assert.equal((await call(vera, method, path, method === 'GET' ? undefined : {})).status, 403, `volunteers cannot ${path}`);
 assert.equal((await call(vera, 'GET', '/api/admin/stats')).status, 403);
 assert.equal((await call(vera, 'GET', '/admin/')).status, 403, 'nor open the admin pages');
 assert.equal((await call(admin, 'GET', '/admin/')).status, 200);
@@ -140,14 +142,16 @@ assert.equal((await call(vera, 'GET', '/api/nothing')).status, 404);
 assert.equal((await call(vera, 'DELETE', '/api/people')).status, 405);
 assert.equal((await call(vera, 'PUT', '/api/people/abc')).status, 404);
 
-// --- upload: preview changes nothing, apply does
-const preview = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(base) });
+// --- upload: sending and previewing change no one, finishing does
+const preview = await previewCsv(sendAs(admin), csv(base));
 assert.deepEqual([preview.added, preview.updated, preview.cured], [30, 0, 0]);
-assert.equal((await everyone()).length, 0, 'a preview writes nothing');
-const bad = await call(admin, 'POST', '/api/admin/uploads/preview', { csv: 'FIRST,LAST\nA,B\n' });
-assert.equal(bad.status, 422);
-assert.match((bad.data as { error: string }).error, /ADDRESS/);
-
+assert.equal((await everyone()).length, 0, 'a preview writes no one');
+assert.equal(count('upload_rows'), 30, 'but the people wait in the staging table');
+await assert.rejects(
+  previewCsv(sendAs(admin), 'FIRST,LAST\nA,B\n'),
+  (e) => e instanceof ImportError && /ADDRESS/.test(e.message),
+  'a file that cannot be read stops in the browser',
+);
 assert.equal(preview.columns.ready, true);
 assert.equal(preview.columns.choices.find((c) => c.field === 'precinct')?.header, 'PRECINCT_NAME');
 
@@ -156,38 +160,97 @@ const renamed = csv(base).replace(
   'FIRST,MID,LAST,STATUSDATE,PARTY,LEGDIST,REASONCODE,PHONE,ADDRESS,PRECINCT_NAME',
   'Given,MID,Family,STATUSDATE,PARTY,LEGDIST,REASONCODE,PHONE,ADDRESS,Area',
 );
-const unguessed = await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed });
-assert.equal(unguessed.status, 422, 'renamed names are not guessed');
-const map = await ok<ColumnMap>(admin, 'POST', '/api/admin/uploads/columns', { csv: renamed });
+await assert.rejects(previewCsv(sendAs(admin), renamed), ImportError, 'renamed names are not guessed');
+const saved = await ok<Record<string, string>>(admin, 'GET', '/api/admin/uploads/columns');
+assert.deepEqual(saved, {}, 'nothing is saved before the first upload');
+const map = describeColumns(renamed, saved);
 assert.equal(map.ready, false);
 assert.deepEqual(
   map.choices.filter((c) => c.required && c.header === null).map((c) => c.field),
   ['first', 'last'],
 );
-assert.ok(map.headers.includes('Given') && map.headers.includes('Area'));
-assert.equal(
-  (await call(vera, 'POST', '/api/admin/uploads/columns', { csv: renamed })).status,
-  403,
-  'volunteers cannot read the columns tool',
-);
-const chosen = { first: 'Given', last: 'Family', precinct: 'Area' };
-const viaPick = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: chosen });
+const viaPick = await previewCsv(sendAs(admin), renamed, { picked: { first: 'Given', last: 'Family', precinct: 'Area' } });
 assert.deepEqual([viaPick.added, viaPick.columns.ready], [30, true], 'with the columns chosen, the file reads');
 assert.equal(viaPick.columns.choices.find((c) => c.field === 'precinct')?.header, 'Area');
-assert.equal(
-  (await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: { first: 'Nope' } })).status,
-  422,
-  'a header the file lacks',
-);
-assert.equal(
-  (await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: { shoe: 'Given' } })).status,
-  400,
-  'a field the importer does not read',
-);
-assert.equal((await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: 'Given' })).status, 400);
-assert.equal((await everyone()).length, 0, 'none of that wrote anything');
+assert.equal((await everyone()).length, 0, 'none of that wrote anyone');
 
-const first = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(base), filename: 'day1.csv' });
+// --- the Worker checks what the browser sends
+const goodStart = {
+  filename: 'x.csv',
+  expected: 1,
+  rows: 1,
+  skippedOtherDistrict: 0,
+  skippedInvalid: 0,
+  duplicates: 0,
+  warnings: [],
+  cities: [],
+  columns: viaPick.columns,
+  used: {},
+};
+for (const bad of [
+  { expected: 0 },
+  { expected: 'many' },
+  { warnings: 'no' },
+  { cities: [{ city: 1 }] },
+  { columns: {} },
+  { used: { shoe: 'A' } },
+  { used: [] },
+])
+  assert.equal((await call(admin, 'POST', '/api/admin/uploads/stage', { ...goodStart, ...bad })).status, 400, JSON.stringify(bad));
+const started = (await call(admin, 'POST', '/api/admin/uploads/stage', goodStart)).data as { token: string; chunk: number };
+assert.equal(started.chunk, 100);
+assert.equal(count('upload_rows'), 0, 'starting another upload drops what the last one left');
+const person = (over: object = {}) => ({
+  key: 'BO|ROE|1 E MAIN ST TEMPE AZ 85281',
+  firstName: 'Bo',
+  middleName: '',
+  lastName: 'Roe',
+  party: '',
+  legdist: '',
+  reasonCode: '',
+  phone: '',
+  address: '1 E MAIN ST TEMPE, AZ 85281',
+  city: 'Tempe',
+  zip: '85281',
+  precinct: '',
+  statusDate: null,
+  ...over,
+});
+const rows = (token: string, list: unknown) => call(admin, 'POST', '/api/admin/uploads/stage/rows', { token, rows: list });
+for (const bad of [
+  [],
+  'x',
+  Array.from({ length: 201 }, () => person()),
+  [person({ key: 'no pipes' })],
+  [person({ key: 'a|b|c|d' })],
+  [person({ firstName: 3 })],
+  [person({ phone: 'x'.repeat(501) })],
+  [person({ statusDate: '10/21/2026' })],
+  [null],
+])
+  assert.equal((await rows(started.token, bad)).status, 400, JSON.stringify(bad).slice(0, 60));
+assert.equal((await rows('nope', [person()])).status, 409, 'rows for an upload that is not the current one');
+assert.equal((await rows(started.token, [person()])).status, 200);
+assert.equal((await rows(started.token, [person()])).status, 200, 'a repeated request changes nothing');
+assert.equal(count('upload_rows'), 1);
+assert.equal((await call(admin, 'POST', '/api/admin/uploads/stage/plan', { token: 'nope' })).status, 409);
+assert.equal((await call(admin, 'POST', '/api/admin/uploads/stage/finish', { token: 'nope' })).status, 409);
+const twoExpected = (await call(admin, 'POST', '/api/admin/uploads/stage', { ...goodStart, expected: 2 })).data as { token: string };
+await rows(twoExpected.token, [person()]);
+assert.equal(
+  (await call(admin, 'POST', '/api/admin/uploads/stage/plan', { token: twoExpected.token })).status,
+  409,
+  'one of two people arrived',
+);
+assert.equal(
+  (await call(admin, 'POST', '/api/admin/uploads/stage/finish', { token: twoExpected.token })).status,
+  409,
+  'and nothing is applied',
+);
+assert.equal((await rows(started.token, [person()])).status, 409, 'the first upload was replaced by the second');
+assert.equal((await everyone()).length, 0);
+
+const first = await uploadCsv(sendAs(admin), csv(base), { filename: 'day1.csv' });
 assert.equal(first.id, 1);
 assert.deepEqual(
   JSON.parse(String(sqlite.prepare("SELECT value FROM settings WHERE key = 'column_map'").get()?.value)).first,
@@ -199,7 +262,12 @@ assert.equal(
   'PRECINCT_NAME',
   'and the audit row says which',
 );
-const people = await everyone();
+// The people in the order of the sheet: the upload gives ids in key order, not sheet order.
+const everyoneNow = await everyone();
+const people = base.map(
+  (b) => everyoneNow.find((p) => p.firstName === b.first && p.lastName === b.last) ?? assert.fail(`${b.first} ${b.last}`),
+);
+assert.equal(people.length, everyoneNow.length);
 assert.equal(people.length, 30);
 assert.ok(people.every((p) => p.status === 'needs_contact' && p.assignedTo === null && p.flag === null));
 const p1 = people[0] ?? assert.fail('no people');
@@ -279,10 +347,13 @@ advance(24);
 const day2 = base
   .filter((_, i) => i !== 3 && i !== 4)
   .concat([{ first: 'Newt', last: 'Newman', address: '5 W NEW ST TEMPE, AZ 85281', precinct: 'ASU WEST' }]);
-const partial = await call(admin, 'POST', '/api/admin/uploads', { csv: csv(day2.slice(0, 5)) });
+const small = await previewCsv(sendAs(admin), csv(day2.slice(0, 5)));
+assert.equal(small.looksPartial, true);
+const partial = await call(admin, 'POST', '/api/admin/uploads/stage/finish', { token: small.token });
 assert.equal(partial.status, 409, 'a file that would cure nearly everyone needs a yes');
+assert.deepEqual((partial.data as { problems: string[] }).problems, ['Send force: true to upload it anyway.']);
 assert.equal((await everyone()).filter((p) => p.status === 'cured').length, 0, 'and changed nothing');
-const up2 = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(day2), filename: 'day2.csv' });
+const up2 = await uploadCsv(sendAs(admin), csv(day2), { filename: 'day2.csv' });
 assert.deepEqual(
   [up2.added, up2.updated, up2.cured, up2.stillUncured, up2.reappeared],
   [1, 28, 2, 0, 0],
@@ -301,7 +372,7 @@ assert.equal((await call(admin, 'POST', `/api/admin/people/${p4.id}/assign`, { v
 
 // Day 3: p1 and p3 have now been listed by two uploads since they were marked contacted: past the grace of one
 advance(24);
-const up3 = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(day2), filename: 'day3.csv' });
+const up3 = await uploadCsv(sendAs(admin), csv(day2), { filename: 'day3.csv' });
 assert.deepEqual([up3.added, up3.cured, up3.stillUncured], [0, 0, 2]);
 const after3 = await everyone();
 const p1c = after3.find((p) => p.id === p1.id) ?? assert.fail('p1');
@@ -314,7 +385,7 @@ assert.deepEqual(
 // Day 4: p4 shows up again
 advance(24);
 const day4 = day2.concat([base[3] ?? assert.fail('base 3')]);
-const up4 = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads', { csv: csv(day4) });
+const up4 = await uploadCsv(sendAs(admin), csv(day4));
 assert.deepEqual([up4.reappeared, up4.added], [1, 0]);
 const p4b = (await everyone()).find((p) => p.id === p4.id) ?? assert.fail('p4');
 assert.deepEqual([p4b.status, p4b.flag, p4b.assignedTo], ['needs_contact', 'reappeared', vid(vera)]);
@@ -382,18 +453,21 @@ assert.deepEqual(
 );
 
 // --- a failed upload leaves nothing behind: make the last statement of the batch fail, and check that none of the others stuck
-const [peopleBefore, uploadsBefore, auditBefore] = [count('people'), count('uploads'), count('audit')];
+const toFail = await previewCsv(sendAs(admin), csv(day4.concat([{ first: 'Zed', last: 'Zimmer', address: '8 W ELM ST MESA, AZ 85201' }])));
+const [peopleBefore, uploadsBefore, auditBefore, stagedBefore] = [count('people'), count('uploads'), count('audit'), count('upload_rows')];
 sqlite.exec("CREATE TRIGGER fail_upload BEFORE INSERT ON audit WHEN NEW.action = 'upload' BEGIN SELECT RAISE(ABORT, 'boom'); END");
-const failed = await call(admin, 'POST', '/api/admin/uploads', {
-  csv: csv(day4.concat([{ first: 'Zed', last: 'Zimmer', address: '8 W ELM ST MESA, AZ 85201' }])),
-});
+const failed = await call(admin, 'POST', '/api/admin/uploads/stage/finish', { token: toFail.token });
 sqlite.exec('DROP TRIGGER fail_upload');
 assert.equal(failed.status, 500);
 assert.ok(
   logged.some((l) => l.includes('boom')),
   'the failure was logged',
 );
-assert.deepEqual([count('people'), count('uploads'), count('audit')], [peopleBefore, uploadsBefore, auditBefore]);
+assert.deepEqual(
+  [count('people'), count('uploads'), count('audit'), count('upload_rows')],
+  [peopleBefore, uploadsBefore, auditBefore, stagedBefore],
+  'and the staged sheet is still there to try again',
+);
 
 // --- the grace period: how many uploads a person marked contacted may stay on the list before it is an unsuccessful cure
 assert.equal((await call(vera, 'PUT', '/api/admin/settings', { graceCycles: 0 })).status, 403, 'only admins change it');
@@ -411,14 +485,14 @@ const fresh = (await everyone()).find((p) => p.assignedTo === null && p.status =
 await ok(vera, 'POST', `/api/people/${fresh.id}/claim`, {});
 await ok(vera, 'POST', `/api/people/${fresh.id}/status`, { status: 'contacted' });
 advance(24);
-const withGrace = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(day4) });
+const withGrace = await previewCsv(sendAs(admin), csv(day4));
 assert.equal(withGrace.stillUncured, 0, 'the first upload after the call is within a grace of one');
 
 assert.deepEqual(await ok(admin, 'PUT', '/api/admin/settings', { graceCycles: 0 }), { graceCycles: 0, resetEnabled: true });
 assert.deepEqual(await ok(admin, 'GET', '/api/admin/settings'), { graceCycles: 0, resetEnabled: true });
-const noGrace = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: csv(day4) });
+const noGrace = await previewCsv(sendAs(admin), csv(day4));
 assert.equal(noGrace.stillUncured, 1, 'with no grace it is an unsuccessful cure at once');
-await ok(admin, 'POST', '/api/admin/uploads', { csv: csv(day4) });
+await uploadCsv(sendAs(admin), csv(day4));
 const unsuccessful = (await everyone()).find((p) => p.id === fresh.id) ?? assert.fail('fresh');
 assert.deepEqual([unsuccessful.status, unsuccessful.flag, unsuccessful.assignedTo], ['needs_contact', 'still_uncured', vid(vera)]);
 const settingsLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=200')).find((e) => e.action === 'settings');
@@ -447,7 +521,7 @@ const afterReset = await ok<AdminStats>(admin, 'GET', '/api/admin/stats');
 assert.deepEqual([afterReset.totals.unassigned, afterReset.totals.cured, afterReset.lastUpload], [0, 0, null]);
 const resetLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=5'))[0];
 assert.deepEqual([resetLog?.action, resetLog?.actor, resetLog?.detail], ['reset', admin, wiped.deleted], 'the log keeps what happened');
-const fresh2 = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(base) });
+const fresh2 = await uploadCsv(sendAs(admin), csv(base));
 assert.deepEqual([fresh2.id, fresh2.added], [1, 30], 'a new upload starts over');
 
 console.log('test-api: ok');

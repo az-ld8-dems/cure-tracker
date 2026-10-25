@@ -6,7 +6,6 @@ import type {
   AdminStats,
   ApiError,
   AuditEntry,
-  ColumnMap,
   ColumnPick,
   ContactMethod,
   Me,
@@ -15,20 +14,27 @@ import type {
   Person,
   PersonDetail,
   ResetResult,
+  StageStart,
   Status,
   Volunteer,
   VolunteerStats,
 } from '../src/api.d.ts';
+import type { IncomingPerson } from '../src/sheet.ts';
+import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
-import { FIELDS, ImportError } from './import.ts';
 import {
-  applyUpload,
-  columnsOf,
+  finishStage,
   graceCycles,
   MAX_GRACE_CYCLES,
+  MAX_STAGE_PEOPLE,
+  MAX_STAGE_ROWS,
   PartialUploadError,
-  previewUpload,
+  planStage,
+  StageError,
+  savedColumns,
   savedFacets,
+  stageRows,
+  startStage,
   uploadRecord,
 } from './uploads.ts';
 
@@ -67,8 +73,6 @@ const json = (data: unknown, status = 200): Response => new Response(JSON.string
 
 const STATUSES_VOLUNTEERS_SET = ['needs_contact', 'left_voicemail', 'contacted'] as const;
 const METHODS = ['call', 'text', 'email', 'in_person', 'other'] as const;
-// An upload is a few megabytes at most: the sheet is a few thousand rows.
-const MAX_CSV = 5_000_000;
 
 const isObject = (v: unknown): v is Body => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -520,46 +524,131 @@ async function adminUploads(c: Ctx): Promise<Response> {
   return json(results.map(uploadRecord));
 }
 
-function csvOf(body: Body): string {
-  const csv = body.csv;
-  if (typeof csv !== 'string' || csv.trim() === '') throw new HttpError(400, 'csv is required');
-  if (csv.length > MAX_CSV) throw new HttpError(413, 'The file is too large');
-  return csv;
+// A count in a request: a whole number from 0 to max.
+function count(body: Body, name: string, max: number): number {
+  const v = body[name];
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0 || v > max)
+    throw new HttpError(400, `${name} must be a whole number from 0 to ${max}`);
+  return v;
 }
 
-// The columns an admin chose for the file: an object of field name to a header of the file, or null for "none".
-function pickedColumns(body: Body): ColumnPick {
-  const raw = body.columns;
-  if (raw === undefined || raw === null) return {};
-  if (!isObject(raw)) throw new HttpError(400, 'columns must be an object');
+const isStrings = (v: unknown, most: number, longest: number): v is string[] =>
+  Array.isArray(v) && v.length <= most && v.every((x) => typeof x === 'string' && x.length <= longest);
+
+// The column of the file used for each field: an object of field name to a header of the file.
+function columnPick(raw: unknown, what: string): ColumnPick {
+  if (!isObject(raw)) throw new HttpError(400, `${what} must be an object`);
   const picked: ColumnPick = {};
   for (const [name, value] of Object.entries(raw)) {
     const field = FIELDS.find((f) => f.key === name);
     if (!field) throw new HttpError(400, `${name} is not a column the importer reads`);
     if (value !== null && (typeof value !== 'string' || value.length > 200))
-      throw new HttpError(400, `columns.${name} must be a header or null`);
-    picked[field.key] = value === '' ? null : value;
+      throw new HttpError(400, `${what}.${name} must be a header or null`);
+    picked[field.key] = value;
   }
   return picked;
 }
 
-async function uploadPreview(c: Ctx, _p: string[], body: Body): Promise<Response> {
-  return json(await previewUpload(c.db, csvOf(body), c.now, pickedColumns(body)));
+// What the browser says about the file it is about to send. The Worker cannot check these, so they only shape what the admin sees.
+function stageStartOf(body: Body): StageStart {
+  const columns = body.columns;
+  if (
+    !isObject(columns) ||
+    !isStrings(columns.headers, 300, 200) ||
+    !isStrings(columns.sample, 300, 500) ||
+    !Array.isArray(columns.choices) ||
+    columns.choices.length > FIELDS.length ||
+    typeof columns.ready !== 'boolean'
+  )
+    throw new HttpError(400, 'columns is not a column map');
+  const cities = body.cities;
+  if (
+    !Array.isArray(cities) ||
+    cities.length > 300 ||
+    !cities.every((c) => isObject(c) && typeof c.city === 'string' && c.city.length <= 100 && Number.isSafeInteger(c.count))
+  )
+    throw new HttpError(400, 'cities is not a list of cities and counts');
+  if (!isStrings(body.warnings, 50, 500)) throw new HttpError(400, 'warnings must be a short list of text');
+  const expected = count(body, 'expected', MAX_STAGE_PEOPLE);
+  if (expected < 1) throw new HttpError(400, 'expected must be at least 1');
+  return {
+    filename: text(body, 'filename', 200, false),
+    expected,
+    rows: count(body, 'rows', 1_000_000),
+    skippedOtherDistrict: count(body, 'skippedOtherDistrict', 1_000_000),
+    skippedInvalid: count(body, 'skippedInvalid', 1_000_000),
+    duplicates: count(body, 'duplicates', 1_000_000),
+    warnings: body.warnings,
+    cities: cities as StageStart['cities'],
+    columns: columns as unknown as StageStart['columns'],
+    used: columnPick(body.used ?? {}, 'used'),
+  };
 }
 
-async function uploadColumns(c: Ctx, _p: string[], body: Body): Promise<Response> {
-  const map: ColumnMap = await columnsOf(c.db, csvOf(body), pickedColumns(body));
-  return json(map);
+const ROW_TEXT = [
+  'firstName',
+  'middleName',
+  'lastName',
+  'party',
+  'legdist',
+  'reasonCode',
+  'phone',
+  'address',
+  'city',
+  'zip',
+  'precinct',
+] as const;
+// "FIRST|LAST|ADDRESS", each with only the letters, digits and spaces that normalizeKey leaves.
+const KEY = /^[A-Z0-9 ]*\|[A-Z0-9 ]*\|[A-Z0-9 ]*$/;
+
+// People as the browser read them (src/sheet.ts). Checked here because the database trusts them.
+function stagedRows(body: Body): IncomingPerson[] {
+  const raw = body.rows;
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_STAGE_ROWS)
+    throw new HttpError(400, `rows must be a list of 1 to ${MAX_STAGE_ROWS} people`);
+  for (const r of raw) {
+    if (!isObject(r) || typeof r.key !== 'string' || r.key.length > 1500 || !KEY.test(r.key))
+      throw new HttpError(400, 'a person has no valid key');
+    for (const f of ROW_TEXT)
+      if (typeof r[f] !== 'string' || r[f].length > 500) throw new HttpError(400, `a person's ${f} must be text of at most 500 characters`);
+    if (r.statusDate !== null && !(typeof r.statusDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.statusDate)))
+      throw new HttpError(400, "a person's statusDate must be YYYY-MM-DD or null");
+  }
+  return raw as unknown as IncomingPerson[];
 }
 
-async function uploadApply(c: Ctx, _p: string[], body: Body): Promise<Response> {
-  const csv = csvOf(body);
-  const filename = text(body, 'filename', 200, false);
+const tokenOf = (body: Body): string => text(body, 'token', 100);
+
+// StageError means the upload is not the current one, or not whole: the page should start again.
+async function staged<T>(work: () => Promise<T>): Promise<T> {
   try {
-    return json(
-      await applyUpload(c.db, csv, { now: c.now, actor: c.me.email, filename, force: body.force === true, columns: pickedColumns(body) }),
-      201,
-    );
+    return await work();
+  } catch (e) {
+    if (e instanceof StageError) throw new HttpError(409, e.message);
+    throw e;
+  }
+}
+
+async function uploadColumns(c: Ctx): Promise<Response> {
+  return json(await savedColumns(c.db));
+}
+
+async function uploadStage(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  return json(await startStage(c.db, c.me.email, c.now, stageStartOf(body)), 201);
+}
+
+async function uploadRows(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  const rows = stagedRows(body);
+  return json({ staged: await staged(() => stageRows(c.db, tokenOf(body), rows)) });
+}
+
+async function uploadPlan(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  return json(await staged(() => planStage(c.db, tokenOf(body))));
+}
+
+async function uploadFinish(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  try {
+    return json(await staged(() => finishStage(c.db, tokenOf(body), { now: c.now, actor: c.me.email, force: body.force === true })), 201);
   } catch (e) {
     if (e instanceof PartialUploadError) throw new HttpError(409, e.message, ['Send force: true to upload it anyway.']);
     throw e;
@@ -645,6 +734,8 @@ async function reset(c: Ctx, _p: string[], body: Body): Promise<Response> {
     c.db.prepare('DELETE FROM people'),
     c.db.prepare("DELETE FROM settings WHERE key = 'facets'"),
     c.db.prepare('DELETE FROM uploads'),
+    c.db.prepare('DELETE FROM upload_rows'),
+    c.db.prepare('DELETE FROM upload_stage'),
     auditStmt(c, 'reset', null, deleted),
   ]);
   const result: ResetResult = { deleted };
@@ -674,9 +765,11 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/settings$/, admin: true, handler: getSettings },
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, admin: true, handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/reset$/, admin: true, handler: reset },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads\/preview$/, admin: true, handler: uploadPreview },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads\/columns$/, admin: true, handler: uploadColumns },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads$/, admin: true, handler: uploadApply },
+  { method: 'GET', pattern: /^\/api\/admin\/uploads\/columns$/, admin: true, handler: uploadColumns },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage$/, admin: true, handler: uploadStage },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/rows$/, admin: true, handler: uploadRows },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/plan$/, admin: true, handler: uploadPlan },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/finish$/, admin: true, handler: uploadFinish },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, admin: true, handler: assign },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/dismiss-flag$/, admin: true, handler: dismissFlag },
   { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/reassign$/, admin: true, handler: reassignAll },
@@ -734,10 +827,6 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
     if (e instanceof HttpError) {
       const err: ApiError = e.problems.length > 0 ? { error: e.message, problems: e.problems } : { error: e.message };
       return json(err, e.status);
-    }
-    if (e instanceof ImportError) {
-      const err: ApiError = { error: e.message, problems: e.problems };
-      return json(err, 422);
     }
     console.error('api error', e);
     return json({ error: 'Something went wrong' } satisfies ApiError, 500);

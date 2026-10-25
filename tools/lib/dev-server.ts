@@ -6,10 +6,10 @@ import { createServer, request as httpRequest } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { AccessVerifier } from '../../worker/access.ts';
 import { type AppEnv, handle } from '../../worker/app.ts';
-import { applyUpload } from '../../worker/uploads.ts';
 import { portOf, startAssetServer } from './asset-server.ts';
 import { sheetCsv, syntheticPeople } from './sheet.ts';
 import { migratedDb, sqliteD1 } from './sqlite-d1.ts';
+import { type Send, uploadCsv } from './upload-test.ts';
 
 export const DEV_ADMIN = 'admin@example.com';
 export const DEV_VOLUNTEER = 'volunteer@example.com';
@@ -33,15 +33,6 @@ export async function startDevServer({
   const assets = await startAssetServer({ root: fileURLToPath(new URL('../../public/', import.meta.url)) });
   const sqlite = migratedDb();
   const db = sqliteD1(sqlite);
-  if (people > 0) {
-    await applyUpload(db, sheetCsv(syntheticPeople(people)), {
-      now: new Date().toISOString(),
-      actor: 'seed@example.com',
-      filename: 'seed.csv',
-      force: true,
-    });
-  }
-
   if (named) {
     for (const [email, who] of [
       [DEV_VOLUNTEER, 'Vera Volunteer'],
@@ -89,6 +80,20 @@ export async function startDevServer({
     DB: db,
     ASSETS,
   };
+
+  // The seed sheet goes in the way the admin page sends one, as the admin.
+  if (people > 0) {
+    const verifier: AccessVerifier = {
+      verify: async () => ({ ok: true, identity: { email: DEV_ADMIN, serviceToken: null, sub: DEV_ADMIN } }),
+    };
+    const send: Send = async (method, path, body) => {
+      const init: RequestInit = { method, headers: body === undefined ? {} : { 'content-type': 'application/json' } };
+      if (body !== undefined) init.body = JSON.stringify(body);
+      const res = await handle(new Request(`http://localhost${path}`, init), env, { verifier });
+      return { status: res.status, data: await res.json() };
+    };
+    await uploadCsv(send, sheetCsv(syntheticPeople(people)), { filename: 'seed.csv', force: true });
+  }
 
   const server = createServer(async (req, res) => {
     try {
