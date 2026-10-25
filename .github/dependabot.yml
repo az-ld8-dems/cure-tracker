@@ -1,0 +1,23 @@
+# Keeps the dev tooling and the pinned GitHub Actions current: a weekly check, one pull request per bump. Every PR runs the three-browser
+# CI, so the open ones are capped. Security updates come as soon as GitHub has an advisory, whatever the schedule (they need "Dependabot
+# security updates" on in the repository settings). Frostline is vendored, so Dependabot does not see it; see vendor/frostline/README.md
+# for updating it.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Wait a week after a release before proposing it, so a withdrawn or compromised version is usually gone by then.
+    cooldown:
+      default-days: 7
+
+  # The workflows pin each action by full commit SHA with a version comment; Dependabot updates both together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
