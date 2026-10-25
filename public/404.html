@@ -7,6 +7,7 @@
     <meta name="description" content="There is nothing at this address.">
     <meta name="theme-color" content="#1f497d">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <script src="/js/theme.js"></script>
     <link rel="stylesheet" href="/tokens.css">
     <link rel="stylesheet" href="/frostline/1.11/components/bundle.css">
     <link rel="stylesheet" href="/app.css">
@@ -18,10 +19,15 @@
     <header class="site-header">
       <div class="site-header__in">
         <a class="site-header__brand" href="/">
-          <picture>
-            <source media="(prefers-color-scheme: dark)" srcset="/img/ld8-dems-logo-dark.webp">
-            <img src="/img/ld8-dems-logo.webp" alt="Arizona LD8 Democrats" width="602" height="151">
-          </picture>
+          <img class="logo logo--light" src="/img/ld8-dems-logo.webp" alt="Arizona LD8 Democrats" width="602" height="151">
+          <img
+            class="logo logo--dark"
+            src="/img/ld8-dems-logo-dark.webp"
+            alt="Arizona LD8 Democrats"
+            width="602"
+            height="151"
+            loading="lazy"
+          >
         </a>
         <nav aria-label="Primary">
           <ul class="nav">
@@ -30,6 +36,13 @@
             <li id="nav-admin" hidden><a href="/admin/">Admin</a></li>
             <li><span class="who" id="who"></span></li>
             <li><a href="/cdn-cgi/access/logout">Sign out</a></li>
+            <li>
+              <select class="fl-select theme-select" data-fl-theme aria-label="Theme">
+                <option value="auto">Auto</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </li>
           </ul>
         </nav>
       </div>

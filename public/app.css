@@ -92,6 +92,33 @@ h3 {
   height: auto;
 }
 
+/* Both logos are in the page; the one that does not match the theme is not shown (and the dark one is lazy, so it is not fetched) */
+.site-header__brand .logo--dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .site-header__brand .logo--light {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .site-header__brand .logo--dark {
+    display: block;
+  }
+}
+
+:root[data-theme="dark"] .site-header__brand .logo--light {
+  display: none;
+}
+
+:root[data-theme="dark"] .site-header__brand .logo--dark {
+  display: block;
+}
+
+.theme-select {
+  width: auto;
+}
+
 .nav {
   display: flex;
   flex-wrap: wrap;
@@ -124,6 +151,14 @@ h3 {
   color: var(--muted);
   font-size: 13px;
   line-height: 20px;
+}
+
+/* On a phone the name gets its own row, empty or not, so the header does not change height when the name arrives */
+@media (max-width: 40rem) {
+  .nav li:has(> .who) {
+    flex-basis: 100%;
+    min-height: 20px;
+  }
 }
 
 /* Page: Frostline's frame (fl-page), with room below for a phone's home indicator */
