@@ -210,7 +210,8 @@ await ok(vera, 'POST', `/api/people/${p1.id}/status`, { status: 'contacted' });
 await ok(vera, 'POST', `/api/people/${p3.id}/status`, { status: 'contacted' });
 await ok(vera, 'POST', `/api/people/${p4.id}/status`, { status: 'contacted' });
 await ok(walt, 'POST', `/api/people/${p5.id}/claim`, {});
-await ok(walt, 'POST', `/api/people/${p5.id}/status`, { status: 'left_voicemail' });
+const vmUnsaid = await ok<Person>(walt, 'POST', `/api/people/${p5.id}/status`, { status: 'left_voicemail' });
+assert.equal(vmUnsaid.contactMethod, 'call', 'a voicemail with no method said is a phone call');
 
 advance(24);
 // Day 2: p4 and p5 are no longer on the sheet (cured); p1 is still there; a new person is.

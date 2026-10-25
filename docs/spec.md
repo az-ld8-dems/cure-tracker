@@ -12,7 +12,7 @@
 | Status | Set by | Meaning |
 | --- | --- | --- |
 | Needs to be contacted | upload (new person), volunteer | nobody has reached them |
-| Left voicemail / texted flyer | volunteer | tried, no conversation |
+| Left voicemail / texted flyer | volunteer | tried, no conversation; with no method chosen, it counts as a phone call |
 | Contacted | volunteer | the volunteer talked to them; the ballot should be cured |
 | Cured | upload only | the state's sheet no longer lists them |
 
