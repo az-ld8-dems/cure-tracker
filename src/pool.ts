@@ -27,14 +27,15 @@ const app = $('#app');
 const PAGE = 30;
 
 if (me) {
-  // The people loaded so far, how many the filters match in all, and how many are in the pool.
+  // The people loaded so far, whether there are more after them, and the precincts the filter knows.
   let people: Person[] = [];
-  let total = 0;
-  let open = 0;
+  let hasMore = false;
+  let precincts: string[] = [];
 
   const search = h('input', { class: 'fl-input', id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
   const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reload() });
-  // Precincts are a long list, so this is a type-to-filter combobox rather than a select. Empty means all precincts.
+  // Precincts are a long list, so this is a type-to-filter combobox rather than a select. Empty means all precincts. The filter applies once
+  // the text is a precinct on the list: the server matches a whole precinct, which is what its index answers.
   const precinct = h('input', {
     class: 'fl-input',
     id: 'precinct',
@@ -146,13 +147,16 @@ if (me) {
   let asked = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
+  // The precinct typed, as the list spells it, or '' when it is empty or not (yet) on the list.
+  const knownPrecinct = (): string => precincts.find((v) => v.toLowerCase() === precinct.value.trim().toLowerCase()) ?? '';
+
   function question(offset: number): string {
     const params = new URLSearchParams({ scope: 'pool', sort: sort.value, limit: String(PAGE), offset: String(offset) });
     if (reversed) params.set('dir', 'desc');
     for (const [name, value] of [
       ['q', search.value.trim()],
       ['city', city.value],
-      ['precinct', precinct.value.trim()],
+      ['precinct', knownPrecinct()],
       ['party', party.value],
     ] as const) {
       if (value !== '') params.set(name, value);
@@ -168,17 +172,26 @@ if (me) {
     }
   }
 
-  async function reload(): Promise<void> {
+  // What the page last asked for, so typing half a precinct name (which does not filter yet) does not ask again.
+  let lastQuestion = '';
+
+  async function reload(force = false): Promise<void> {
     showSort();
+    const asking = question(0);
+    if (!force && asking === lastQuestion) {
+      render();
+      return;
+    }
+    lastQuestion = asking;
     const mine = ++asked;
     try {
-      const page = await api<PeoplePage>('GET', question(0));
+      const page = await api<PeoplePage>('GET', asking);
       if (mine !== asked) return;
       people = page.people;
-      total = page.total;
-      open = page.open ?? page.total;
+      hasMore = page.hasMore;
       render();
     } catch (e) {
+      lastQuestion = '';
       if (mine === asked) toast(failureText(e), 'error');
     }
   }
@@ -193,14 +206,14 @@ if (me) {
     try {
       await api<Person>('POST', `/api/people/${p.id}/claim`, {});
       people = people.filter((x) => x.id !== p.id);
-      total = Math.max(0, total - 1);
-      open = Math.max(0, open - 1);
       toast(`${personName(p)} is on your list now.`);
-      render();
+      // A page that was only this person, with more behind it, asks again.
+      if (people.length === 0 && hasMore) await reload(true);
+      else render();
     } catch (e) {
       toast(failureText(e), 'error');
       // Somebody else was faster: show the pool as it is now.
-      await reload();
+      await reload(true);
     }
   }
 
@@ -258,7 +271,7 @@ if (me) {
       // Somebody may have claimed people since the last page, so skip anyone already shown.
       const have = new Set(people.map((p) => p.id));
       people = [...people, ...page.people.filter((p) => !have.has(p.id))];
-      total = page.total;
+      hasMore = page.hasMore;
       render();
     } catch (e) {
       toast(failureText(e), 'error');
@@ -266,24 +279,27 @@ if (me) {
   }
 
   function render(): void {
+    const filtered = [search.value.trim(), city.value, precinct.value.trim(), party.value].some((v) => v !== '');
+    const unlisted = precinct.value.trim() !== '' && knownPrecinct() === '';
+    const hint = unlisted ? ' Choose a precinct from the list to filter by it.' : '';
     count.textContent =
-      open === 0
-        ? 'Nobody is waiting for a volunteer right now.'
-        : `Showing ${people.length} of ${plural(total, 'person', 'people')}${total === open ? '' : ` (${open} in all)`}.`;
+      people.length === 0
+        ? `${filtered ? 'Nobody matches.' : 'Nobody is waiting for a volunteer right now.'}${hint}`
+        : `Showing ${plural(people.length, 'person', 'people')}${hasMore ? ', with more to show' : ''}.${hint}`;
     clear(tbody, ...people.map(tableRow));
     clear(list, ...people.map(compactRow));
-    clear(more, total > people.length ? h('button', { class: 'fl-btn', type: 'button', onclick: showMore }, 'Show more') : null);
+    clear(more, hasMore ? h('button', { class: 'fl-btn', type: 'button', onclick: showMore }, 'Show more') : null);
   }
 
   try {
     showSort();
     const first = await api<PeoplePage>('GET', `${question(0)}&facets=1`);
     people = first.people;
-    total = first.total;
-    open = first.open ?? first.total;
+    hasMore = first.hasMore;
+    lastQuestion = question(0);
     const facets = first.facets ?? { cities: [], parties: [], precincts: [] };
     fill(city, 'All cities', facets.cities);
-    const precincts = facets.precincts;
+    precincts = facets.precincts;
     window.Frostline.combobox(precinct, {
       mode: 'suggest',
       label: 'Precincts',
