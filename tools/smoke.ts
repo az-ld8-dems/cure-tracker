@@ -249,10 +249,12 @@ try {
   expect('dark', await doraPage.locator('.logo--dark').isVisible(), 'the dark logo is not shown in a dark browser');
   expect('dark', !(await doraPage.locator('.logo--light').isVisible()), 'the light logo is shown in a dark browser');
   // The header's theme switch overrides the browser and is remembered across pages.
+  await doraPage.locator('#who').click();
   await doraPage.getByLabel('Theme').selectOption('light');
   expect('light', await doraPage.locator('.logo--light').isVisible(), 'the switch to light did not show the light logo');
   await doraPage.goto(`${base}/pool/`);
   expect('light', (await doraPage.locator('html').getAttribute('data-theme')) === 'light', 'the chosen theme was not kept');
+  await doraPage.locator('#who').click();
   await doraPage.getByLabel('Theme').selectOption('auto');
   await doraPage.goto(`${base}/`);
   await doraPage.getByLabel('Your name').waitFor();

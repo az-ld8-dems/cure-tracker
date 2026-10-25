@@ -34,14 +34,21 @@
             <li><a href="/">My people</a></li>
             <li><a href="/pool/">Find people</a></li>
             <li id="nav-admin" hidden><a href="/admin/">Admin</a></li>
-            <li><span class="who" id="who"></span></li>
-            <li><a href="/cdn-cgi/access/logout">Sign out</a></li>
             <li>
-              <select class="fl-select theme-select" data-fl-theme aria-label="Theme">
-                <option value="auto">Auto</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
+              <details class="account" id="account">
+                <summary id="who">Account</summary>
+                <div class="account__panel">
+                  <div class="fl-field">
+                    <label class="fl-label" for="theme">Theme</label>
+                    <select class="fl-select" id="theme" data-fl-theme>
+                      <option value="auto">Auto</option>
+                      <option value="light">Light</option>
+                      <option value="dark">Dark</option>
+                    </select>
+                  </div>
+                  <a href="/cdn-cgi/access/logout">Sign out</a>
+                </div>
+              </details>
             </li>
           </ul>
         </nav>
