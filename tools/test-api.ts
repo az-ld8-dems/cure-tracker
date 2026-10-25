@@ -5,6 +5,7 @@ import type {
   AdminSettings,
   AdminStats,
   AuditEntry,
+  ColumnMap,
   Me,
   PeoplePage,
   Person,
@@ -147,8 +148,57 @@ const bad = await call(admin, 'POST', '/api/admin/uploads/preview', { csv: 'FIRS
 assert.equal(bad.status, 422);
 assert.match((bad.data as { error: string }).error, /ADDRESS/);
 
+assert.equal(preview.columns.ready, true);
+assert.equal(preview.columns.choices.find((c) => c.field === 'precinct')?.header, 'PRECINCT_NAME');
+
+// --- columns: the state may rename or reorder them, so an admin can say which is which
+const renamed = csv(base).replace(
+  'FIRST,MID,LAST,STATUSDATE,PARTY,LEGDIST,REASONCODE,PHONE,ADDRESS,PRECINCT_NAME',
+  'Given,MID,Family,STATUSDATE,PARTY,LEGDIST,REASONCODE,PHONE,ADDRESS,Area',
+);
+const unguessed = await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed });
+assert.equal(unguessed.status, 422, 'renamed names are not guessed');
+const map = await ok<ColumnMap>(admin, 'POST', '/api/admin/uploads/columns', { csv: renamed });
+assert.equal(map.ready, false);
+assert.deepEqual(
+  map.choices.filter((c) => c.required && c.header === null).map((c) => c.field),
+  ['first', 'last'],
+);
+assert.ok(map.headers.includes('Given') && map.headers.includes('Area'));
+assert.equal(
+  (await call(vera, 'POST', '/api/admin/uploads/columns', { csv: renamed })).status,
+  403,
+  'volunteers cannot read the columns tool',
+);
+const chosen = { first: 'Given', last: 'Family', precinct: 'Area' };
+const viaPick = await ok<UploadPreview>(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: chosen });
+assert.deepEqual([viaPick.added, viaPick.columns.ready], [30, true], 'with the columns chosen, the file reads');
+assert.equal(viaPick.columns.choices.find((c) => c.field === 'precinct')?.header, 'Area');
+assert.equal(
+  (await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: { first: 'Nope' } })).status,
+  422,
+  'a header the file lacks',
+);
+assert.equal(
+  (await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: { shoe: 'Given' } })).status,
+  400,
+  'a field the importer does not read',
+);
+assert.equal((await call(admin, 'POST', '/api/admin/uploads/preview', { csv: renamed, columns: 'Given' })).status, 400);
+assert.equal((await everyone()).length, 0, 'none of that wrote anything');
+
 const first = await ok<UploadPreview & { id: number }>(admin, 'POST', '/api/admin/uploads', { csv: csv(base), filename: 'day1.csv' });
 assert.equal(first.id, 1);
+assert.deepEqual(
+  JSON.parse(String(sqlite.prepare("SELECT value FROM settings WHERE key = 'column_map'").get()?.value)).first,
+  'FIRST',
+  'the columns used are remembered',
+);
+assert.equal(
+  JSON.parse(String(sqlite.prepare("SELECT detail FROM audit WHERE action = 'upload'").get()?.detail)).columns.precinct,
+  'PRECINCT_NAME',
+  'and the audit row says which',
+);
 const people = await everyone();
 assert.equal(people.length, 30);
 assert.ok(people.every((p) => p.status === 'needs_contact' && p.assignedTo === null && p.flag === null));

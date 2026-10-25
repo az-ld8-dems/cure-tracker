@@ -6,6 +6,8 @@ import type {
   AdminStats,
   ApiError,
   AuditEntry,
+  ColumnMap,
+  ColumnPick,
   ContactMethod,
   Me,
   Note,
@@ -18,8 +20,8 @@ import type {
   VolunteerStats,
 } from '../src/api.d.ts';
 import type { Db, Stmt, Value } from './db.ts';
-import { ImportError } from './import.ts';
-import { applyUpload, graceCycles, MAX_GRACE_CYCLES, PartialUploadError, previewUpload, uploadRecord } from './uploads.ts';
+import { FIELDS, ImportError } from './import.ts';
+import { applyUpload, columnsOf, graceCycles, MAX_GRACE_CYCLES, PartialUploadError, previewUpload, uploadRecord } from './uploads.ts';
 
 export interface ApiContext {
   db: Db;
@@ -542,15 +544,39 @@ function csvOf(body: Body): string {
   return csv;
 }
 
+// The columns an admin chose for the file: an object of field name to a header of the file, or null for "none".
+function pickedColumns(body: Body): ColumnPick {
+  const raw = body.columns;
+  if (raw === undefined || raw === null) return {};
+  if (!isObject(raw)) throw new HttpError(400, 'columns must be an object');
+  const picked: ColumnPick = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const field = FIELDS.find((f) => f.key === name);
+    if (!field) throw new HttpError(400, `${name} is not a column the importer reads`);
+    if (value !== null && (typeof value !== 'string' || value.length > 200))
+      throw new HttpError(400, `columns.${name} must be a header or null`);
+    picked[field.key] = value === '' ? null : value;
+  }
+  return picked;
+}
+
 async function uploadPreview(c: Ctx, _p: string[], body: Body): Promise<Response> {
-  return json(await previewUpload(c.db, csvOf(body), c.now));
+  return json(await previewUpload(c.db, csvOf(body), c.now, pickedColumns(body)));
+}
+
+async function uploadColumns(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  const map: ColumnMap = await columnsOf(c.db, csvOf(body), pickedColumns(body));
+  return json(map);
 }
 
 async function uploadApply(c: Ctx, _p: string[], body: Body): Promise<Response> {
   const csv = csvOf(body);
   const filename = text(body, 'filename', 200, false);
   try {
-    return json(await applyUpload(c.db, csv, { now: c.now, actor: c.me.email, filename, force: body.force === true }), 201);
+    return json(
+      await applyUpload(c.db, csv, { now: c.now, actor: c.me.email, filename, force: body.force === true, columns: pickedColumns(body) }),
+      201,
+    );
   } catch (e) {
     if (e instanceof PartialUploadError) throw new HttpError(409, e.message, ['Send force: true to upload it anyway.']);
     throw e;
@@ -665,6 +691,7 @@ const routes: Route[] = [
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, admin: true, handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/reset$/, admin: true, handler: reset },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/preview$/, admin: true, handler: uploadPreview },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/columns$/, admin: true, handler: uploadColumns },
   { method: 'POST', pattern: /^\/api\/admin\/uploads$/, admin: true, handler: uploadApply },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, admin: true, handler: assign },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/dismiss-flag$/, admin: true, handler: dismissFlag },
