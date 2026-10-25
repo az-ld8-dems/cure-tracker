@@ -173,6 +173,10 @@ try {
   await page.locator('.pool-table tbody tr').first().waitFor();
   expect('find people', await page.getByLabel('City').isVisible(), 'the filters should be open on a wide screen');
   expect('find people', !(await page.locator('.pool-rows').isVisible()), 'the compact rows should be hidden on a wide screen');
+  // A header sorts the table: the select follows, the header says which way it runs, and the first row is the first by last name.
+  await page.getByRole('button', { name: 'Person' }).click();
+  await page.locator('th[aria-sort="ascending"]').waitFor();
+  expect('find people', (await page.getByLabel('Sort by').inputValue()) === 'name', 'the Sort by select did not follow the header');
   await check(page, 'find people (table)');
 
   // the admin pages are closed to a volunteer (this page's own 403 is the point)

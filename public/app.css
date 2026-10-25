@@ -336,6 +336,44 @@ h3 {
   border-bottom: 1px solid var(--border);
 }
 
+/* A sortable column header is a button that looks like the header; the sorted one shows which way it runs with a small triangle. */
+.pool-sort {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.pool-sort:hover {
+  color: var(--ink);
+}
+
+.pool-sort:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+th[aria-sort="ascending"] > .pool-sort::after,
+th[aria-sort="descending"] > .pool-sort::after {
+  content: "";
+  border-inline: 4px solid transparent;
+}
+
+th[aria-sort="ascending"] > .pool-sort::after {
+  border-block-end: 5px solid currentcolor;
+}
+
+th[aria-sort="descending"] > .pool-sort::after {
+  border-block-start: 5px solid currentcolor;
+}
+
 /* A name with its badges under it, in a row of the table or of the compact list */
 .pool-who {
   display: flex;

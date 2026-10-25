@@ -74,6 +74,30 @@ if (me) {
   const count = h('p', { class: 'fl-note', role: 'status' });
   // Two views of the same page: a table where there is room, and compact rows on a phone. CSS shows one of them (.pool-table, .pool-rows).
   const tbody = h('tbody');
+  // Three headers sort the table: a click asks for that sort, and the active one says which way it runs (aria-sort). The "Sort by"
+  // select does the same on a phone and stays in step.
+  const sortHeads = new Map<string, { th: HTMLElement; direction: 'ascending' | 'descending' }>();
+  function head(label: string, by?: string, direction: 'ascending' | 'descending' = 'ascending'): HTMLElement {
+    if (by === undefined) return h('th', { scope: 'col' }, label);
+    const th = h(
+      'th',
+      { scope: 'col' },
+      h(
+        'button',
+        {
+          class: 'pool-sort',
+          type: 'button',
+          onclick: () => {
+            sort.value = by;
+            reload();
+          },
+        },
+        label,
+      ),
+    );
+    sortHeads.set(by, { th, direction });
+    return th;
+  }
   const table = h(
     'div',
     { class: 'fl-table-wrap pool-table', role: 'region', 'aria-label': 'People waiting for a volunteer', tabindex: '0' },
@@ -86,9 +110,13 @@ if (me) {
         h(
           'tr',
           {},
-          ...['Person', 'Phone', 'Address', 'Precinct', 'Party'].map((t) => h('th', { scope: 'col' }, t)),
-          h('th', { scope: 'col' }, 'Uncured'),
-          h('th', { scope: 'col' }, 'Reason'),
+          head('Person', 'name'),
+          head('Phone'),
+          head('Address'),
+          head('Precinct', 'precinct'),
+          head('Party'),
+          head('Uncured', 'days', 'descending'),
+          head('Reason'),
           h('th', { scope: 'col' }, h('span', { class: 'fl-sr-only' }, 'Claim')),
         ),
       ),
@@ -122,6 +150,10 @@ if (me) {
   }
 
   async function reload(): Promise<void> {
+    for (const [by, { th, direction }] of sortHeads) {
+      if (by === sort.value) th.setAttribute('aria-sort', direction);
+      else th.removeAttribute('aria-sort');
+    }
     const mine = ++asked;
     try {
       const page = await api<PeoplePage>('GET', question(0));
@@ -228,6 +260,7 @@ if (me) {
   }
 
   try {
+    sortHeads.get(sort.value)?.th.setAttribute('aria-sort', sortHeads.get(sort.value)?.direction ?? 'ascending');
     const first = await api<PeoplePage>('GET', `${question(0)}&facets=1`);
     people = first.people;
     total = first.total;
