@@ -279,6 +279,85 @@ h3 {
   gap: var(--space-3);
 }
 
+/* Find people: a table where there is room, compact rows on a phone. Both are in the page; CSS shows one. */
+.pool-rows {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style-type: "\200B"; /* keeps the list a list for VoiceOver (see .people) */
+}
+
+.pool-row {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* The search box, then the other filters in a disclosure. With room, the disclosure's frame and summary go and all five share a row. */
+.pool-filters {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 48rem) {
+  .pool-filters {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+    align-items: end;
+  }
+
+  .pool-filters > .fl-disclosure {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .pool-filters > .fl-disclosure > summary {
+    display: none;
+  }
+
+  .pool-filters .fl-toolbar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* A person's name is a row header, which Frostline styles like a column header (small, spaced, muted). Here it is the row's main text. */
+.fl-table tbody th {
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--ink);
+  white-space: normal;
+  border-bottom: 1px solid var(--border);
+}
+
+/* A name with its badges under it, in a row of the table or of the compact list */
+.pool-who {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.pool-table {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  .pool-table {
+    display: block;
+  }
+
+  .pool-rows {
+    display: none;
+  }
+}
+
 /* Frostline sizes its own buttons to their content inside a card; the LD8 button should too */
 .fl-card > .btn {
   justify-self: start;
