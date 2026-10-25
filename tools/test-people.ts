@@ -92,6 +92,17 @@ assert.deepEqual(byName, [...byName].sort(), 'by last name');
 const byPrecinct = (await page(vera, '?sort=precinct&limit=200')).people.map((p) => p.precinct);
 assert.deepEqual(byPrecinct, [...byPrecinct].sort(), 'by precinct');
 
+// the other direction is the exact reverse
+const names = (await page(vera, '?sort=name&limit=200')).people.map((p) => p.id);
+const namesBack = (await page(vera, '?sort=name&dir=desc&limit=200')).people.map((p) => p.id);
+assert.deepEqual(namesBack, [...names].reverse(), 'dir=desc reverses the name sort');
+const newest = (await page(vera, '?dir=desc&limit=200')).people.map((p) => p.daysUncured ?? -1);
+assert.deepEqual(
+  newest,
+  [...newest].sort((a, b) => a - b),
+  'newest first when the days sort is reversed',
+);
+
 // --- scopes: claimed people leave the pool and show under mine, and everyone is for admins
 const claimed = first.people.slice(0, 3);
 for (const p of claimed) assert.equal((await call(vera, 'POST', `/api/people/${p.id}/claim`, {})).status, 200);
@@ -105,7 +116,16 @@ assert.equal((await page(admin, '?scope=all&limit=200')).total, 120);
 assert.equal((await call(vera, 'GET', '/api/people?scope=all')).status, 403, 'volunteers cannot list everyone');
 
 // --- bad questions are refused
-for (const bad of ['?scope=nobody', '?sort=password', '?limit=0', '?limit=201', '?limit=x', '?offset=-1', `?q=${'x'.repeat(101)}`]) {
+for (const bad of [
+  '?scope=nobody',
+  '?sort=password',
+  '?dir=sideways',
+  '?limit=0',
+  '?limit=201',
+  '?limit=x',
+  '?offset=-1',
+  `?q=${'x'.repeat(101)}`,
+]) {
   assert.equal((await call(vera, 'GET', `/api/people${bad}`)).status, 400, bad);
 }
 assert.equal((await call(vera, 'GET', '/api/people?scope=mine&limit=1000')).status, 200, 'mine may ask for a thousand');

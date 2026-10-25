@@ -66,6 +66,9 @@ The LD8 doc gives the scale and the container widths but no rules for using them
 
 - **Frostline's toast container sits outside every landmark**, so axe's `region` rule flags it while a toast is showing. The smoke test clears toasts before scanning (they are transient and announced by their own live region). The fix belongs in Frostline: put the container in a landmark or give it one.
 - Frostline's `bundle.css` header comment still says "1.6".
+- **`fl-table` has no phone layout.** Wide tables only scroll sideways (`fl-table-wrap`), which is poor for Find people on a phone. The page renders the table and a compact list of rows and shows one by width (`.pool-table`, `.pool-rows` in `app.css`). A responsive stacked mode in Frostline would replace the second rendering.
+- **`fl-table` styles a row header (`<th scope="row">`) like a column header** (small, letter-spaced, muted, no wrap). Find people needs the person's name there for screen readers, so `app.css` resets it (`.fl-table tbody th`). The fix belongs in Frostline: scope the header look to `thead th`.
+- **`fl-toolbar` columns are `auto-fit` at 200px**, so four filters in about 830px wrap to a second row. `app.css` pins four columns there (`.pool-filters .fl-toolbar`); a column-count modifier would do it.
 
 ## Updating Frostline
 

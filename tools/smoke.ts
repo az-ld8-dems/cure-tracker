@@ -111,18 +111,21 @@ try {
   await page.getByRole('link', { name: 'Find people', exact: true }).click();
   await page.getByText(/Showing 30 of 40 people/).waitFor();
   await check(page, 'find people');
+  // On a phone the filters (other than the search) are in a disclosure, closed at first.
+  expect('find people', !(await page.getByLabel('City').isVisible()), 'the filters should start closed on a phone');
+  await page.getByText('Filter and sort').click();
   await page.getByLabel('City').selectOption('Tempe');
   await page.getByText(/Showing \d+ of \d+ people \(40 in all\)/).waitFor();
-  const tempe = await page.locator('.people > li').count();
+  const tempe = await page.locator('.pool-row').count();
   expect('find people', tempe > 0 && tempe <= 30, `filtering by city showed ${tempe} cards`);
   await page.getByLabel('City').selectOption('');
   await page.getByLabel('Search name or street').fill('zzzz');
   await page.getByText('Showing 0 of 0 people (40 in all).').waitFor();
   await page.getByLabel('Search name or street').fill('');
   await page.getByLabel('Sort by').selectOption('name');
-  const firstCard = page.locator('.people > li').first();
-  const claimedName = (await firstCard.locator('h2').textContent()) ?? '';
-  await firstCard.getByRole('button', { name: /^Claim / }).click();
+  const firstRow = page.locator('.pool-row').first();
+  const claimedName = (await firstRow.locator('strong').textContent()) ?? '';
+  await firstRow.getByRole('button', { name: /^Claim / }).click();
   await page.getByText(`${claimedName} is on your list now.`).waitFor();
   await page.getByText(/Showing 30 of 39 people/).waitFor();
 
@@ -165,6 +168,19 @@ try {
   await check(page, 'my people (a worked card)');
   await page.setViewportSize({ width: 1280, height: 800 });
   await check(page, 'my people (desktop)');
+  // With room, Find people is a table, and its filters are open.
+  await page.getByRole('link', { name: 'Find people', exact: true }).click();
+  await page.locator('.pool-table tbody tr').first().waitFor();
+  expect('find people', await page.getByLabel('City').isVisible(), 'the filters should be open on a wide screen');
+  expect('find people', !(await page.locator('.pool-rows').isVisible()), 'the compact rows should be hidden on a wide screen');
+  // A header sorts the table: the select follows, the header says which way it runs, and the first row is the first by last name.
+  await page.getByRole('button', { name: 'Person' }).click();
+  await page.locator('th[aria-sort="ascending"]').waitFor();
+  expect('find people', (await page.getByLabel('Sort by').inputValue()) === 'name', 'the Sort by select did not follow the header');
+  // A second click on the same header runs it the other way.
+  await page.getByRole('button', { name: 'Person' }).click();
+  await page.locator('th[aria-sort="descending"]').waitFor();
+  await check(page, 'find people (table)');
 
   // the admin pages are closed to a volunteer (this page's own 403 is the point)
   const denied = await (await ctx.newPage()).goto(`${base}/admin/`);
@@ -263,7 +279,7 @@ try {
   await doraPage.goto(`${base}/pool/`);
   await doraPage.getByText(/Showing 30 of/).waitFor();
   await doraPage
-    .locator('.people > li')
+    .locator('.pool-row')
     .first()
     .getByRole('button', { name: /^Claim / })
     .click();

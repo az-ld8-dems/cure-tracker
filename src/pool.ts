@@ -1,18 +1,19 @@
 // "Find people": everyone who still needs curing and has nobody yet. Filter by city, precinct or party, sort, and claim.
-import type { PeoplePage, Person, Volunteer } from './api.d.ts';
+import type { PeoplePage, Person } from './api.d.ts';
 import {
   $,
+  addressText,
   api,
   banner,
   boot,
   clear,
-  facts,
+  daysText,
   failureText,
   field,
   flagBadge,
   h,
-  loadVolunteers,
   personName,
+  phoneHref,
   plural,
   statusBadge,
   titleCase,
@@ -30,7 +31,6 @@ if (me) {
   let people: Person[] = [];
   let total = 0;
   let open = 0;
-  let volunteers = new Map<number, Volunteer>();
 
   const search = h('input', { class: 'fl-input', id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
   const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reload() });
@@ -45,14 +45,95 @@ if (me) {
   const party = h('select', { class: 'fl-select', id: 'party', onchange: () => reload() });
   const sort = h(
     'select',
-    { class: 'fl-select', id: 'sort', onchange: () => reload() },
+    {
+      class: 'fl-select',
+      id: 'sort',
+      onchange: () => {
+        reversed = false;
+        reload();
+      },
+    },
     h('option', { value: 'days' }, 'Longest uncured first'),
     h('option', { value: 'precinct' }, 'Precinct'),
     h('option', { value: 'city' }, 'City'),
     h('option', { value: 'name' }, 'Last name'),
   );
+  // The other filters sit in a disclosure on a phone. Where there is room it stays open, its summary is hidden, and they share a row with
+  // the search box (app.css).
+  const filters = h(
+    'details',
+    { class: 'fl-disclosure' },
+    h('summary', {}, 'Filter and sort'),
+    h(
+      'div',
+      { class: 'fl-toolbar' },
+      field('city', 'City', city),
+      field('precinct', 'Precinct', precinct),
+      field('party', 'Party', party),
+      field('sort', 'Sort by', sort),
+    ),
+  );
+  const room = window.matchMedia('(min-width: 48rem)');
+  filters.open = room.matches;
+  room.addEventListener('change', () => {
+    filters.open = room.matches;
+  });
   const count = h('p', { class: 'fl-note', role: 'status' });
-  const list = h('ul', { class: 'fl-grid people' });
+  // Two views of the same page: a table where there is room, and compact rows on a phone. CSS shows one of them (.pool-table, .pool-rows).
+  const tbody = h('tbody');
+  // Three headers sort the table: a click asks for that sort, a second click runs it the other way, and the active one says which way it
+  // runs (aria-sort). The "Sort by" select does the same on a phone and stays in step, except that it only picks the natural direction.
+  let reversed = false;
+  const sortHeads = new Map<string, { th: HTMLElement; direction: 'ascending' | 'descending' }>();
+  // `direction` is the way the column reads in its natural order (days uncured, longest first, reads as descending).
+  function head(label: string, by?: string, direction: 'ascending' | 'descending' = 'ascending'): HTMLElement {
+    if (by === undefined) return h('th', { scope: 'col' }, label);
+    const th = h(
+      'th',
+      { scope: 'col' },
+      h(
+        'button',
+        {
+          class: 'pool-sort',
+          type: 'button',
+          onclick: () => {
+            reversed = sort.value === by ? !reversed : false;
+            sort.value = by;
+            reload();
+          },
+        },
+        label,
+      ),
+    );
+    sortHeads.set(by, { th, direction });
+    return th;
+  }
+  const table = h(
+    'div',
+    { class: 'fl-table-wrap pool-table', role: 'region', 'aria-label': 'People waiting for a volunteer', tabindex: '0' },
+    h(
+      'table',
+      { class: 'fl-table' },
+      h(
+        'thead',
+        {},
+        h(
+          'tr',
+          {},
+          head('Person', 'name'),
+          head('Phone'),
+          head('Address'),
+          head('Precinct', 'precinct'),
+          head('Party'),
+          head('Uncured', 'days', 'descending'),
+          head('Reason'),
+          h('th', { scope: 'col' }, h('span', { class: 'fl-sr-only' }, 'Claim')),
+        ),
+      ),
+      tbody,
+    ),
+  );
+  const list = h('ul', { class: 'pool-rows' });
   const more = h('div', { class: 'fl-cluster' });
 
   function fill(select: HTMLSelectElement, all: string, values: string[], label: (v: string) => string = titleCase): void {
@@ -67,6 +148,7 @@ if (me) {
 
   function question(offset: number): string {
     const params = new URLSearchParams({ scope: 'pool', sort: sort.value, limit: String(PAGE), offset: String(offset) });
+    if (reversed) params.set('dir', 'desc');
     for (const [name, value] of [
       ['q', search.value.trim()],
       ['city', city.value],
@@ -78,7 +160,16 @@ if (me) {
     return `/api/people?${params}`;
   }
 
+  function showSort(): void {
+    for (const [by, { th, direction }] of sortHeads) {
+      if (by !== sort.value) th.removeAttribute('aria-sort');
+      else if (!reversed) th.setAttribute('aria-sort', direction);
+      else th.setAttribute('aria-sort', direction === 'ascending' ? 'descending' : 'ascending');
+    }
+  }
+
   async function reload(): Promise<void> {
+    showSort();
     const mine = ++asked;
     try {
       const page = await api<PeoplePage>('GET', question(0));
@@ -113,14 +204,49 @@ if (me) {
     }
   }
 
-  function card(p: Person): HTMLElement {
+  const claimButton = (p: Person): HTMLElement =>
+    h(
+      'button',
+      { class: 'fl-btn fl-btn--primary', type: 'button', 'aria-label': `Claim ${personName(p)}`, onclick: () => claim(p) },
+      'Claim',
+    );
+
+  const phoneLink = (p: Person): Node | string => (p.phone ? h('a', { href: phoneHref(p.phone) }, p.phone) : 'None');
+
+  // A name, with badges under it for what is unusual: everyone in the pool starts as "needs to be contacted", so that one is left out.
+  const who = (p: Person): HTMLElement =>
+    h(
+      'div',
+      { class: 'pool-who' },
+      h('strong', {}, personName(p)),
+      p.status === 'needs_contact' ? null : statusBadge(p.status),
+      p.flag ? flagBadge(p.flag) : null,
+    );
+
+  function tableRow(p: Person): HTMLElement {
+    return h(
+      'tr',
+      {},
+      h('th', { scope: 'row' }, who(p)),
+      h('td', { class: 'fl-nowrap' }, phoneLink(p)),
+      h('td', {}, addressText(p.address)),
+      h('td', {}, p.precinct || 'Unknown'),
+      h('td', {}, p.party || 'Unknown'),
+      h('td', { class: 'fl-nowrap' }, daysText(p)),
+      h('td', {}, p.reasonCode ? titleCase(p.reasonCode) : ''),
+      h('td', {}, claimButton(p)),
+    );
+  }
+
+  function compactRow(p: Person): HTMLElement {
+    const meta = [p.precinct, p.party, p.daysUncured === null ? '' : daysText(p)].filter((v) => v !== '').join(' · ');
     return h(
       'li',
-      { class: 'fl-card' },
-      h('div', { class: 'card-head' }, h('h2', { class: 'fl-card__title' }, personName(p)), statusBadge(p.status)),
-      p.flag ? flagBadge(p.flag) : null,
-      facts(p, volunteers, false),
-      h('button', { class: 'btn btn--accent', type: 'button', onclick: () => claim(p) }, `Claim ${personName(p)}`),
+      { class: 'pool-row' },
+      who(p),
+      h('p', {}, addressText(p.address)),
+      h('p', { class: 'fl-help' }, meta, p.phone ? ' · ' : '', p.phone ? phoneLink(p) : null),
+      claimButton(p),
     );
   }
 
@@ -144,13 +270,14 @@ if (me) {
       open === 0
         ? 'Nobody is waiting for a volunteer right now.'
         : `Showing ${people.length} of ${plural(total, 'person', 'people')}${total === open ? '' : ` (${open} in all)`}.`;
-    clear(list, ...people.map(card));
+    clear(tbody, ...people.map(tableRow));
+    clear(list, ...people.map(compactRow));
     clear(more, total > people.length ? h('button', { class: 'fl-btn', type: 'button', onclick: showMore }, 'Show more') : null);
   }
 
   try {
-    const [first, vols] = await Promise.all([api<PeoplePage>('GET', `${question(0)}&facets=1`), loadVolunteers()]);
-    volunteers = vols;
+    showSort();
+    const first = await api<PeoplePage>('GET', `${question(0)}&facets=1`);
     people = first.people;
     total = first.total;
     open = first.open ?? first.total;
@@ -171,14 +298,12 @@ if (me) {
       app,
       h(
         'form',
-        { class: 'fl-toolbar', role: 'search', onsubmit: (e) => e.preventDefault() },
+        { class: 'pool-filters', role: 'search', onsubmit: (e) => e.preventDefault() },
         field('search', 'Search name or street', search),
-        field('city', 'City', city),
-        field('precinct', 'Precinct', precinct),
-        field('party', 'Party', party),
-        field('sort', 'Sort by', sort),
+        filters,
       ),
       count,
+      table,
       list,
       more,
     );
