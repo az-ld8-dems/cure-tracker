@@ -133,11 +133,14 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
   // cured and re-added as a stranger (losing their notes and volunteer). Only reported; nothing is merged.
   const goneByAddress = new Map<string, ExistingPerson[]>();
   const goneByName = new Map<string, ExistingPerson[]>();
+  const goneByFirstAddress = new Map<string, ExistingPerson[]>();
   for (const g of gone) {
     const a = `${clean(g.lastName)}|${clean(g.address)}`;
     const n = `${clean(g.firstName)}|${clean(g.lastName)}`;
+    const f = `${clean(g.firstName)}|${clean(g.address)}`;
     goneByAddress.set(a, [...(goneByAddress.get(a) ?? []), g]);
     goneByName.set(n, [...(goneByName.get(n) ?? []), g]);
+    goneByFirstAddress.set(f, [...(goneByFirstAddress.get(f) ?? []), g]);
   }
   const possibleMatches: PossibleMatch[] = [];
   for (const p of inserts) {
@@ -146,14 +149,24 @@ export function planUpload(incoming: IncomingPerson[], existing: ExistingPerson[
       possibleMatches.push({
         kind: 'address',
         existing: { id: g.id, name: `${g.firstName} ${g.lastName}`, address: g.address },
-        incoming: { name: incomingName, address: p.address },
+        incoming: { key: p.key, name: incomingName, address: p.address },
+        merged: false,
+      });
+    }
+    for (const g of goneByFirstAddress.get(`${clean(p.firstName)}|${clean(p.address)}`) ?? []) {
+      possibleMatches.push({
+        kind: 'surname',
+        existing: { id: g.id, name: `${g.firstName} ${g.lastName}`, address: g.address },
+        incoming: { key: p.key, name: incomingName, address: p.address },
+        merged: false,
       });
     }
     for (const g of goneByName.get(`${clean(p.firstName)}|${clean(p.lastName)}`) ?? []) {
       possibleMatches.push({
         kind: 'moved',
         existing: { id: g.id, name: `${g.firstName} ${g.lastName}`, address: g.address },
-        incoming: { name: incomingName, address: p.address },
+        incoming: { key: p.key, name: incomingName, address: p.address },
+        merged: false,
       });
     }
   }

@@ -2,10 +2,11 @@
 // database answers the common ones from an index. Synthetic data on the real migrations, as in test-api.ts.
 import assert from 'node:assert/strict';
 import type { PeoplePage } from '../src/api.d.ts';
+import { finishSheet, mergeAndPlan } from '../src/upload.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { sheetCsv, syntheticPeople } from './lib/sheet.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
-import { type Send, uploadCsv } from './lib/upload-test.ts';
+import { previewCsv, requestOver, type Send, uploadCsv } from './lib/upload-test.ts';
 
 console.warn = () => {};
 console.error = () => {};
@@ -187,5 +188,94 @@ assert.equal(
   1,
   'a changed precinct rewrites that one person',
 );
+
+// --- a corrected record: marked as the same person, the upload updates them and keeps their notes, volunteer and status
+const subject = (await page(vera, '?limit=200')).people[0] ?? assert.fail('someone in the pool');
+await call(vera, 'POST', `/api/people/${subject.id}/claim`, {});
+await call(vera, 'POST', `/api/people/${subject.id}/notes`, { body: 'Prefers texts.' });
+await call(vera, 'POST', `/api/people/${subject.id}/status`, { status: 'left_voicemail' });
+const sameAsSubject = (p: (typeof sheet)[number]) =>
+  `${p.first} ${p.last}`.toLowerCase() === `${subject.firstName} ${subject.lastName}`.toLowerCase();
+const corrected = moved.map((p) => (sameAsSubject(p) ? { ...p, last: `${p.last}son` } : p));
+assert.ok(
+  corrected.some((p) => p.last.endsWith('son')),
+  'the subject is on the sheet',
+);
+const request = requestOver(sendAs(admin));
+const staged = await previewCsv(sendAs(admin), sheetCsv(corrected), { filename: 'day4.csv' });
+assert.deepEqual(
+  [staged.added, staged.cured, staged.possibleMatchCount],
+  [1, 1, 1],
+  'a corrected last name is one person gone and one new',
+);
+const pair = staged.possibleMatches[0] ?? assert.fail('the pair');
+assert.equal(pair.kind, 'surname', 'same first name and address, another last name');
+assert.equal(pair.existing.id, subject.id);
+assert.equal(pair.merged, false);
+
+// the checks the API makes
+const mergeCall = (token: string, merges: unknown) => call(admin, 'POST', '/api/admin/uploads/stage/merges', { token, merges });
+const someoneElse = (await page(vera, '?limit=3')).people.find((p) => p.id !== subject.id) ?? assert.fail('another person');
+assert.equal(
+  (await mergeCall(staged.token, [{ id: someoneElse.id, key: pair.incoming.key }])).status,
+  400,
+  'two people who do not look alike',
+);
+assert.equal(
+  (await mergeCall(staged.token, [{ id: pair.existing.id, key: 'NOBODY|HERE|1 A ST' }])).status,
+  400,
+  'a person who is not on the sheet',
+);
+assert.equal(
+  (
+    await mergeCall(staged.token, [
+      { id: pair.existing.id, key: pair.incoming.key },
+      { id: pair.existing.id, key: pair.incoming.key },
+    ])
+  ).status,
+  400,
+  'one person twice',
+);
+assert.equal((await mergeCall(staged.token, [{ id: 'x', key: pair.incoming.key }])).status, 400);
+assert.equal((await mergeCall(staged.token, 'all')).status, 400);
+assert.equal((await mergeCall('nope', [])).status, 409, 'not the current upload');
+assert.equal((await call(vera, 'POST', '/api/admin/uploads/stage/merges', { token: staged.token, merges: [] })).status, 403);
+assert.equal(Number(sqlite.prepare('SELECT COUNT(*) AS n FROM upload_merges').get()?.n), 0, 'none of those stuck');
+
+// marking them
+const merged = await mergeAndPlan(staged.token, [{ id: pair.existing.id, key: pair.incoming.key }], request);
+assert.deepEqual([merged.added, merged.cured, merged.updated], [0, 0, 120], 'nobody is cured or added');
+assert.equal(merged.possibleMatches[0]?.merged, true, 'the list still shows the pair, marked');
+assert.equal(
+  merged.warnings.some((w) => /look like someone who disappeared/.test(w)),
+  false,
+  'nothing is left to check',
+);
+const unmarked = await mergeAndPlan(staged.token, [], request);
+assert.deepEqual([unmarked.added, unmarked.cured], [1, 1], 'unmarking puts it back');
+await mergeAndPlan(staged.token, [{ id: pair.existing.id, key: pair.incoming.key }], request);
+
+const done = await finishSheet(staged.token, false, request);
+assert.deepEqual([done.added, done.cured], [0, 0]);
+const after = await call(vera, 'GET', `/api/people/${subject.id}`);
+const person2 = after.data as {
+  person: { id: number; lastName: string; assignedTo: number | null; status: string };
+  notes: { body: string }[];
+};
+assert.equal(person2.person.id, subject.id, 'the same record');
+assert.equal(person2.person.lastName.toLowerCase().endsWith('son'), true, 'with the corrected name');
+assert.notEqual(person2.person.assignedTo, null, 'with their volunteer');
+assert.equal(person2.person.status, 'left_voicemail', 'and their status');
+assert.deepEqual(
+  person2.notes.map((n) => n.body),
+  ['Prefers texts.'],
+  'and their notes',
+);
+assert.equal(Number(sqlite.prepare('SELECT COUNT(*) AS n FROM people').get()?.n), 120, 'nobody was added');
+assert.equal(Number(sqlite.prepare("SELECT COUNT(*) AS n FROM people WHERE status = 'cured'").get()?.n), 0, 'nobody was cured');
+const mergedLog = sqlite.prepare("SELECT person_id, detail FROM audit WHERE action = 'import.merged'").get();
+assert.equal(Number(mergedLog?.person_id), subject.id);
+assert.equal(JSON.parse(String(mergedLog?.detail)).was.name.toLowerCase(), `${subject.firstName} ${subject.lastName}`.toLowerCase());
+assert.equal(Number(sqlite.prepare('SELECT COUNT(*) AS n FROM upload_merges').get()?.n), 0, 'the marks are cleared');
 
 console.log('test-people: ok');

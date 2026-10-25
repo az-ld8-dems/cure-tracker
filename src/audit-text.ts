@@ -35,6 +35,11 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
       return 'cured: no longer on the state’s sheet';
     case 'import.still_uncured':
       return 'unsuccessful cure: still on the sheet after contact';
+    case 'import.merged': {
+      const was = isRecord(d.was) ? d.was : {};
+      const now = isRecord(d.now) ? d.now : {};
+      return `marked as the same person as ${String(now.name)}, ${String(now.address)} on the state’s sheet (was ${String(was.name)}, ${String(was.address)})`;
+    }
     case 'import.reappeared':
       return 'back on the sheet after being cured';
     case 'upload':

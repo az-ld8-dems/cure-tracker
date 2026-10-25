@@ -1,7 +1,7 @@
 // Sends the state's sheet to the Worker: reads the CSV here (src/sheet.ts), then sends the people a request's worth at a time, because a
 // free Worker has about 10 ms of CPU a request and could not read a large file. The admin page uses this, and so do the tests, with their
 // own way of making a request. Free of browser globals.
-import type { ColumnPick, StageStart, StageStarted, UploadPreview } from './api.d.ts';
+import type { ColumnPick, MergePair, StageStart, StageStarted, UploadPreview } from './api.d.ts';
 import { readSheet } from './sheet.ts';
 
 export type Request = <T>(method: 'GET' | 'POST', path: string, body?: unknown) => Promise<T>;
@@ -65,4 +65,10 @@ export async function stageSheet(text: string, filename: string, request: Reques
 // Applies a sheet that stageSheet has sent. Nothing is sent again.
 export function finishSheet(token: string, force: boolean, request: Request): Promise<UploadPreview & { id: number }> {
   return request('POST', '/api/admin/uploads/stage/finish', { token, force });
+}
+
+// Marks pairs of possible matches as the same person (replacing earlier marks) and asks again what uploading would do. Changes no one.
+export async function mergeAndPlan(token: string, merges: MergePair[], request: Request): Promise<UploadPreview> {
+  await request('POST', '/api/admin/uploads/stage/merges', { token, merges });
+  return request<UploadPreview>('POST', '/api/admin/uploads/stage/plan', { token });
 }

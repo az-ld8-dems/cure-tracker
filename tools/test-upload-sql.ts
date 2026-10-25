@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import type { Flag, Status } from '../src/api.d.ts';
 import { type IncomingPerson, normalizeKey, splitAddress } from '../src/sheet.ts';
-import { finishStage, planStage, stageRows, startStage } from '../worker/uploads.ts';
+import { finishStage, planStage, setMerges, stageRows, startStage } from '../worker/uploads.ts';
 import { type ExistingPerson, MATCH_LIMIT, planUpload } from './lib/plan.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
 
@@ -98,7 +98,9 @@ const COLUMN: Record<(typeof DETAILS)[number], string> = {
 
 let scenarios = 0;
 let withMatches = 0;
-const seen = { reappeared: 0, stillUncured: 0, unchanged: 0, rewritten: 0, cured: 0, added: 0 };
+let merged = 0;
+const kinds = new Set<string>();
+const seen = { reappeared: 0, stillUncured: 0, unchanged: 0, rewritten: 0, cured: 0, added: 0, merged: 0 };
 
 for (let seed = 1; seed <= 250; seed++) {
   const rnd = random(seed);
@@ -185,19 +187,31 @@ for (let seed = 1; seed <= 250; seed++) {
   }
   for (const r of rows) {
     if (int(4) !== 0 || incoming.has(r.key)) continue;
-    // A corrected record: same last name and address, another first name; or the same name at another address.
+    // A corrected record: another first name, another last name, or another address.
+    const how = int(3);
     const corrected: IncomingPerson =
-      int(2) === 0
+      how === 0
         ? { ...r, firstName: `${r.firstName}y`, key: normalizeKey(`${r.firstName}y`, r.lastName, r.address) }
-        : { ...r, address: `${r.address} APT 2`, key: normalizeKey(r.firstName, r.lastName, `${r.address} APT 2`) };
+        : how === 1
+          ? { ...r, lastName: `${r.lastName}n`, key: normalizeKey(r.firstName, `${r.lastName}n`, r.address) }
+          : { ...r, address: `${r.address} APT 2`, key: normalizeKey(r.firstName, r.lastName, `${r.address} APT 2`) };
     incoming.set(corrected.key, corrected);
   }
   if (incoming.size === 0) incoming.set(identity(99).key, identity(99));
   const sheet = [...incoming.values()].map((p) => ({ ...p, statusDate: p.statusDate }));
 
-  // --- the reference
+  // --- the reference. First without merges, for the counts and the matches the admin would see; then with some of those pairs marked as
+  // the same person, which is the same as the existing person having had the sheet's key all along.
   const existing: ExistingPerson[] = rows.map((r) => ({ ...r }));
-  const plan = planUpload(sheet, existing, NOW, grace);
+  const plan0 = planUpload(sheet, existing, NOW, grace);
+  const merges: { id: number; key: string }[] = [];
+  for (const m of plan0.possibleMatches) {
+    if (int(2) === 0 || merges.some((x) => x.id === m.existing.id || x.key === m.incoming.key)) continue;
+    merges.push({ id: m.existing.id, key: m.incoming.key });
+  }
+  const keyAfter = new Map(merges.map((m) => [m.id, m.key]));
+  const existing2: ExistingPerson[] = rows.map((r) => ({ ...r, key: keyAfter.get(r.id) ?? r.key }));
+  const plan = planUpload(sheet, existing2, NOW, grace);
 
   // --- the SQL
   const { token } = await startStage(db, 'a@example.com', NOW, {
@@ -213,43 +227,60 @@ for (let seed = 1; seed <= 250; seed++) {
     used: {},
   });
   for (let i = 0; i < sheet.length; i += 37) await stageRows(db, token, sheet.slice(i, i + 37));
-  const preview = await planStage(db, token);
-
-  assert.deepEqual(
-    [preview.added, preview.updated, preview.cured, preview.stillUncured, preview.reappeared, preview.openBefore, preview.looksPartial],
-    [
-      plan.inserts.length,
-      plan.updates.length + plan.unchanged,
-      plan.cures.length,
-      plan.stillUncured,
-      plan.reappeared,
-      plan.openBefore,
-      plan.looksPartial,
-    ],
-    `seed ${seed}: counts`,
-  );
+  const preview0 = await planStage(db, token);
+  const countsOf = (x: {
+    added: number;
+    updated: number;
+    cured: number;
+    stillUncured: number;
+    reappeared: number;
+    openBefore: number;
+    looksPartial: boolean;
+  }) => [x.added, x.updated, x.cured, x.stillUncured, x.reappeared, x.openBefore, x.looksPartial];
+  const reference = (q: typeof plan) => [
+    q.inserts.length,
+    q.updates.length + q.unchanged,
+    q.cures.length,
+    q.stillUncured,
+    q.reappeared,
+    q.openBefore,
+    q.looksPartial,
+  ];
+  assert.deepEqual(countsOf(preview0), reference(plan0), `seed ${seed}: counts`);
   const matchKey = (m: {
     kind: string;
     existing: { id: number; name: string; address: string };
-    incoming: { name: string; address: string };
-  }) => `${m.kind}|${m.existing.id}|${m.existing.name}|${m.existing.address}|${m.incoming.name}|${m.incoming.address}`;
-  assert.equal(preview.possibleMatchCount, plan.possibleMatches.length, `seed ${seed}: possible matches`);
-  assert.deepEqual(
-    preview.possibleMatches
-      .map(matchKey)
-      .sort()
-      .filter((k) => plan.possibleMatches.map(matchKey).includes(k)).length,
-    Math.min(MATCH_LIMIT, plan.possibleMatches.length),
-    `seed ${seed}: the matches listed are among the reference's`,
+    incoming: { key: string; name: string; address: string };
+  }) => `${m.kind}|${m.existing.id}|${m.existing.name}|${m.existing.address}|${m.incoming.key}|${m.incoming.name}|${m.incoming.address}`;
+  assert.equal(preview0.possibleMatchCount, plan0.possibleMatches.length, `seed ${seed}: possible matches`);
+  const wanted = plan0.possibleMatches.map(matchKey);
+  assert.equal(
+    preview0.possibleMatches.filter((m) => wanted.includes(matchKey(m)) && !m.merged).length,
+    Math.min(MATCH_LIMIT, plan0.possibleMatches.length),
+    `seed ${seed}: the matches listed are the reference's`,
   );
-  if (plan.possibleMatches.length > 0) withMatches++;
+  if (plan0.possibleMatches.length > 0) withMatches++;
+  for (const kind of ['address', 'surname', 'moved']) if (plan0.possibleMatches.some((m) => m.kind === kind)) kinds.add(kind);
+
+  // Marking pairs as the same person changes what the upload does, and only that.
+  await setMerges(db, token, merges);
+  const preview = await planStage(db, token);
+  assert.deepEqual(countsOf(preview), reference(plan), `seed ${seed}: counts with ${merges.length} merges`);
+  assert.equal(preview.possibleMatchCount, plan0.possibleMatches.length, `seed ${seed}: the list stays whole after merges`);
+  const isMerged = (m: { existing: { id: number }; incoming: { key: string } }) =>
+    merges.some((x) => x.id === m.existing.id && x.key === m.incoming.key);
+  assert.ok(
+    preview.possibleMatches.every((m) => m.merged === isMerged(m)),
+    `seed ${seed}: merged flags`,
+  );
+  merged += merges.length;
 
   const result = await finishStage(db, token, { now: NOW, actor: 'a@example.com', force: true });
   const id = result.id;
 
   // --- the reference applied: what each person should look like now
   const expected = new Map<string, Row>();
-  for (const r of rows) expected.set(r.key, { ...r });
+  for (const r of rows) expected.set(keyAfter.get(r.id) ?? r.key, { ...r, key: keyAfter.get(r.id) ?? r.key });
   for (const u of plan.updates) {
     const r = [...expected.values()].find((x) => x.id === u.id) ?? assert.fail('update');
     Object.assign(r, u.incoming, {
@@ -286,6 +317,7 @@ for (let seed = 1; seed <= 250; seed++) {
     });
     seen.added++;
   }
+  seen.merged += merges.length;
   seen.reappeared += plan.reappeared;
   seen.stillUncured += plan.stillUncured;
 
@@ -337,8 +369,21 @@ for (let seed = 1; seed <= 250; seed++) {
     .all()
     .map((r) => ({ action: String(r.action), key: keyOf.get(Number(r.person_id)), detail: JSON.parse(String(r.detail)) }));
   const wantAudit = [
-    ...plan.audit.map((a) => ({ action: a.action, key: existing.find((x) => x.id === a.personId)?.key, detail: a.detail })),
-    ...plan.cures.map((c) => ({ action: 'import.cured', key: existing.find((x) => x.id === c)?.key, detail: { upload: id } })),
+    ...plan.audit.map((a) => ({ action: a.action, key: existing2.find((x) => x.id === a.personId)?.key, detail: a.detail })),
+    ...plan.cures.map((c) => ({ action: 'import.cured', key: existing2.find((x) => x.id === c)?.key, detail: { upload: id } })),
+    ...merges.map((m) => {
+      const was = existing.find((x) => x.id === m.id) ?? assert.fail('merged person');
+      const now = sheet.find((x) => x.key === m.key) ?? assert.fail('merged row');
+      return {
+        action: 'import.merged',
+        key: m.key,
+        detail: {
+          upload: id,
+          was: { name: `${was.firstName} ${was.lastName}`, address: was.address },
+          now: { name: `${now.firstName} ${now.lastName}`, address: now.address },
+        },
+      };
+    }),
   ];
   assert.deepEqual(auditOf(actualAudit), auditOf(wantAudit), `seed ${seed}: audit`);
 
@@ -364,6 +409,8 @@ for (let seed = 1; seed <= 250; seed++) {
 // The scenarios must have reached every rule, or passing means little.
 for (const [what, n] of Object.entries(seen)) assert.ok(n > 20, `the random states reached ${what} only ${n} times`);
 assert.ok(withMatches > 10, `corrected names came up in ${withMatches} states`);
+assert.ok(merged > 20, `only ${merged} pairs were marked as the same person`);
+assert.deepEqual([...kinds].sort(), ['address', 'moved', 'surname'], 'every kind of possible match came up');
 console.log(
   `test-upload-sql: ok (${scenarios} random states; ${Object.entries(seen)
     .map(([k, v]) => `${v} ${k}`)

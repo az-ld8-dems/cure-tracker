@@ -10,6 +10,7 @@ import type {
   ColumnPick,
   PeoplePage,
   Person,
+  PossibleMatch,
   ResetResult,
   UploadPreview,
   UploadRecord,
@@ -38,7 +39,14 @@ import {
   volunteerName,
 } from './common.ts';
 import { describeColumns, ImportError } from './sheet.ts';
-import { finishSheet, stageSheet } from './upload.ts';
+import { finishSheet, mergeAndPlan, stageSheet } from './upload.ts';
+
+// Why a listed pair looks like one person.
+const MATCH_WHY: Record<PossibleMatch['kind'], string> = {
+  address: 'Same last name and address',
+  surname: 'Same first name and address',
+  moved: 'Same name, different address',
+};
 
 const me = await boot();
 const app = $('#app');
@@ -200,7 +208,22 @@ if (me && !me.isAdmin) {
       }
     }
 
-    function showPreview(p: UploadPreview): void {
+    // Mark a listed pair as the same person, or not: the Worker keeps the marks with the staged sheet and works the counts out again. A
+    // person can be in one pair, so choosing one clears any other pair with the same person in it.
+    async function decide(p: UploadPreview, m: PossibleMatch, on: boolean, row: number): Promise<void> {
+      const keep = p.possibleMatches.filter((x) => x.merged && x.existing.id !== m.existing.id && x.incoming.key !== m.incoming.key);
+      const chosen = (on ? [...keep, m] : p.possibleMatches.filter((x) => x.merged && x !== m)).map((x) => ({
+        id: x.existing.id,
+        key: x.incoming.key,
+      }));
+      try {
+        showPreview(await mergeAndPlan(token, chosen, api), row);
+      } catch (e) {
+        show(problem(e));
+      }
+    }
+
+    function showPreview(p: UploadPreview, focusRow?: number): void {
       const force = h('input', { id: 'force', type: 'checkbox' });
       const go = h(
         'button',
@@ -251,15 +274,27 @@ if (me && !me.isAdmin) {
               h(
                 'p',
                 { class: 'fl-help' },
-                'A new person next to someone who disappeared. If they are the same person, they will be cured and re-added as new, and their notes stay on the old record.',
+                'A new person next to someone who disappeared. If they are the same person, tick it: the upload then updates the old record, with its notes, volunteer and status. If not, the old one is cured and the new one added as a stranger.',
               ),
               table(
                 'Possible matches',
-                ['Who disappeared', 'Who appeared', 'Why'],
-                p.possibleMatches.map((m) => [
+                ['Same person?', 'Who disappeared', 'Who appeared', 'Why'],
+                p.possibleMatches.map((m, i) => [
+                  h(
+                    'label',
+                    { class: 'fl-check', for: `merge-${i}` },
+                    h('input', {
+                      id: `merge-${i}`,
+                      type: 'checkbox',
+                      checked: m.merged,
+                      onchange: (e: Event) => void decide(p, m, (e.target as HTMLInputElement).checked, i),
+                    }),
+                    h('span', { class: 'fl-sr-only' }, `${m.existing.name} and ${m.incoming.name} are `),
+                    'the same person',
+                  ),
                   `${m.existing.name}, ${m.existing.address}`,
                   `${m.incoming.name}, ${m.incoming.address}`,
-                  m.kind === 'address' ? 'Same last name and address' : 'Same name, different address',
+                  MATCH_WHY[m.kind],
                 ]),
               ),
               p.possibleMatchCount > p.possibleMatches.length
@@ -279,6 +314,8 @@ if (me && !me.isAdmin) {
         go,
         h('p', { class: 'fl-help' }, `Cities found: ${p.cities.map((c) => `${c.city || 'unknown'} (${c.count})`).join(', ')}.`),
       );
+      // The page was drawn again with the new counts: keep the keyboard where it was.
+      if (focusRow !== undefined) document.querySelector<HTMLInputElement>(`#merge-${focusRow}`)?.focus();
     }
 
     clear(

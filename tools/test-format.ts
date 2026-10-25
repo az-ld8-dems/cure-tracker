@@ -31,6 +31,10 @@ assert.equal(say('reassign', { from: 1, to: null, count: 6 }), 'moved 6 people f
 assert.equal(say('flag.dismiss'), 'dismissed the flag');
 assert.equal(say('import.cured'), 'cured: no longer on the state’s sheet');
 assert.equal(say('import.still_uncured'), 'unsuccessful cure: still on the sheet after contact');
+assert.equal(
+  say('import.merged', { was: { name: 'Bo Roe', address: '1 E Main St' }, now: { name: 'Bo Rowe', address: '1 E Main St' } }),
+  'marked as the same person as Bo Rowe, 1 E Main St on the state’s sheet (was Bo Roe, 1 E Main St)',
+);
 assert.equal(say('import.reappeared'), 'back on the sheet after being cured');
 assert.equal(
   say('upload', { filename: 'day2.csv', added: 1, cured: 3, stillUncured: 1, reappeared: 0 }),
