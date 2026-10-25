@@ -71,3 +71,8 @@ Restoring replaces the whole database in place, so anything done after that minu
 ## After the election
 
 Delete the Access application, the Worker (`npx wrangler delete`) and the D1 database. The voters' names, phones and addresses should not outlive the campaign.
+
+## Trying the site at full size with made-up voters
+
+`npm run synthetic -- --people 10000` writes `synthetic-sheet.csv`: a believable sheet in the real column layout, with every name, street and phone number invented (the phone numbers are in the 555-0100 to 555-0199 range reserved for fiction, so a volunteer who taps one will not ring a stranger; the streets and cities are real names with made-up house numbers). It also writes some rows for other districts and some repeated rows, to see the importer leave them out. `--day2` writes the next day's sheet from the same `--seed`: some people gone, some new, some changed, some addresses written another way (`APT 12` as `12`, `STREET` for `ST`, ZIP+4) and a few last names corrected, to see re-uploads and possible matches. Upload the first on the admin page, and the second a day later or straight after. When you are done, use **Start over** on the admin page to delete every voter, note and upload (D1 Time Travel still holds the made-up data for 30 days). The CSVs are gitignored; they never go in the repo.
+
