@@ -128,6 +128,39 @@ export interface PossibleMatch {
   incoming: { name: string; address: string };
 }
 
+// The columns of the state's sheet that the importer reads. `header` is the column of the file used for the field, or null when the file
+// has none.
+export type ColumnField =
+  | 'first'
+  | 'middle'
+  | 'last'
+  | 'address'
+  | 'statusDate'
+  | 'party'
+  | 'legdist'
+  | 'reasonCode'
+  | 'phone'
+  | 'precinct';
+
+export interface ColumnChoice {
+  field: ColumnField;
+  label: string;
+  required: boolean;
+  header: string | null;
+}
+
+// The file's own headers (each once, as written) with the first row's value under each, and what each field is matched to. `ready` is
+// whether every required field has a column.
+export interface ColumnMap {
+  headers: string[];
+  sample: string[];
+  choices: ColumnChoice[];
+  ready: boolean;
+}
+
+// What an admin picks: a header of the file for a field, or null for "none". A field left out is matched by the saved choice or by name.
+export type ColumnPick = Partial<Record<ColumnField, string | null>>;
+
 export interface UploadPreview {
   // Rows of the sheet that were read, and how many were left out: another legislative district, no name or address, or a repeat of
   // a person already in the same file.
@@ -148,6 +181,7 @@ export interface UploadPreview {
   possibleMatches: PossibleMatch[];
   possibleMatchCount: number;
   cities: { city: string; count: number }[];
+  columns: ColumnMap;
 }
 
 export interface ResetResult {

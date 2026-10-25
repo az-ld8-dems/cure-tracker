@@ -451,3 +451,8 @@ th[aria-sort="descending"] > .pool-sort::after {
 [hidden] {
   display: none;
 }
+
+/* The column matching on the admin upload: fields line up at the top, whether or not one has an example line under it */
+.columns-grid {
+  align-items: start;
+}
