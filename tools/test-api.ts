@@ -500,6 +500,23 @@ assert.deepEqual([unsuccessful.status, unsuccessful.flag, unsuccessful.assignedT
 const settingsLog = (await ok<AuditEntry[]>(admin, 'GET', '/api/admin/audit?limit=200')).find((e) => e.action === 'settings');
 assert.deepEqual(settingsLog?.detail, { graceCycles: { from: 1, to: 0 } });
 
+// --- being seen costs a write at most every few minutes, and never stops a page from loading
+const seenAt = () => String(sqlite.prepare('SELECT last_seen_at AS t FROM volunteers WHERE email = ?').get(vera)?.t);
+await ok(vera, 'GET', '/api/me');
+const first_seen = seenAt();
+advance(0.05); // three minutes
+await ok(vera, 'GET', '/api/me');
+assert.equal(seenAt(), first_seen, 'seen again within five minutes: no write');
+advance(0.1); // nine minutes since
+await ok(vera, 'GET', '/api/me');
+assert.notEqual(seenAt(), first_seen, 'after five minutes it is recorded');
+// The database refuses writes (the free plan's daily limit): the page still loads, and so do the lists.
+sqlite.exec("CREATE TRIGGER no_writes BEFORE UPDATE ON volunteers BEGIN SELECT RAISE(ABORT, 'daily write limit'); END");
+advance(0.2);
+assert.equal((await call(vera, 'GET', '/api/me')).status, 200, 'who is signed in comes back although the write fails');
+assert.equal((await call(vera, 'GET', '/api/people')).status, 200);
+sqlite.exec('DROP TRIGGER no_writes');
+
 // --- reset: delete every voter, to start over after trying the tool with test data
 const confirmReset = { confirm: 'delete all voters' };
 assert.equal((await call(vera, 'POST', '/api/admin/reset', confirmReset)).status, 403, 'only admins');
