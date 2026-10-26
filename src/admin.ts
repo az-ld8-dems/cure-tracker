@@ -42,6 +42,7 @@ import {
   toast,
   volunteerName,
 } from './common.ts';
+import { PRECINCTS } from './precincts.ts';
 import { describeColumns, ImportError } from './sheet.ts';
 import { finishSheet, mergeAndPlan, stageSheet } from './upload.ts';
 
@@ -436,9 +437,9 @@ if (me && !me.isAdmin && !me.organizes) {
           'grant-precincts',
           'Or only these precincts',
           list,
-          'Separate with commas, spelled as on the state’s sheet. Leave it empty, with the box unchecked, to take the access away. People with no precinct can be moved by anyone who organizes.',
+          'Precincts of the district, separated with commas (the box suggests them). Leave it empty, with the box unchecked, to take the access away. People with no precinct can be moved by anyone who organizes.',
         ),
-        h('datalist', { id: 'grant-known' }, ...organizerList.precincts.map((p) => h('option', { value: p }))),
+        h('datalist', { id: 'grant-known' }, ...PRECINCTS.map(([city, name]) => h('option', { value: name }, city))),
         h(
           'div',
           { class: 'fl-cluster' },

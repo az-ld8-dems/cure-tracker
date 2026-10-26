@@ -1,5 +1,6 @@
 // Precinct organizers: volunteers a site admin lets move people between volunteers in some precincts, or in all of them. The grants are rows
 // in `organizers` (migration 0010); a site admin (the ADMIN_EMAILS secret) organizes everything and needs none.
+import { canonicalPrecinct } from '../src/precincts.ts';
 import type { Db, Stmt } from './db.ts';
 
 export const ALL_PRECINCTS = '*';
@@ -55,7 +56,7 @@ export interface Grant {
   precincts: string[];
 }
 
-// Checks what an admin sent for someone's grant: precincts are short, non-blank text, kept once each (ignoring case).
+// Checks what an admin sent for someone's grant: precincts are on the district's list (src/precincts.ts), kept once each, as the list spells them.
 export function parseGrant(body: Record<string, unknown>): Grant {
   if (typeof body.all !== 'boolean') throw new RangeError('all must be true or false');
   const list = body.precincts;
@@ -66,7 +67,10 @@ export function parseGrant(body: Record<string, unknown>): Grant {
     const precinct = item.trim();
     if (precinct === '' || precinct.length > MAX_PRECINCT || precinct === ALL_PRECINCTS)
       throw new RangeError(`a precinct must be 1 to ${MAX_PRECINCT} characters, and not ${ALL_PRECINCTS}`);
-    if (!seen.has(precinct.toLowerCase())) seen.set(precinct.toLowerCase(), precinct);
+    // Only precincts on the district's list, kept as the list spells them.
+    const listed = canonicalPrecinct(precinct);
+    if (listed === null) throw new RangeError(`${precinct} is not a precinct on the list`);
+    seen.set(listed.toLowerCase(), listed);
   }
   return { all: body.all, precincts: body.all ? [] : [...seen.values()].sort((a, b) => a.localeCompare(b, 'en', { numeric: true })) };
 }

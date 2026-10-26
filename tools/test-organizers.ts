@@ -42,7 +42,7 @@ sqlite
     "INSERT INTO uploads (id, uploaded_by, filename, created_at, rows, added, cured, still_uncured, reappeared) VALUES (1, 'x', 'x.csv', ?, 0, 0, 0, 0, 0)",
   )
   .run(NOW);
-const precincts = ['101', '102', '205', ''];
+const precincts = ['Alma', 'Arcadia', 'Cairo', ''];
 for (const [i, precinct] of precincts.entries()) {
   for (const n of [1, 2]) {
     sqlite
@@ -65,7 +65,7 @@ const assignedTo = (id: number): number | null => {
 
 const volunteer = async (email: string): Promise<number> => ((await call(email, 'GET', '/api/me')).data as Me).id;
 const boss = await volunteer('boss@example.com');
-const anna = await volunteer('anna@example.com'); // organizes 101
+const anna = await volunteer('anna@example.com'); // organizes Alma
 const carl = await volunteer('carl@example.com'); // organizes everything
 const dora = await volunteer('dora@example.com'); // a plain volunteer
 const eve = await volunteer('eve@example.com'); // a recipient of moves
@@ -89,27 +89,32 @@ assert.equal(
   400,
 );
 assert.equal(
-  (await call('boss@example.com', 'PUT', `/api/admin/volunteers/999/organizer`, { all: false, precincts: ['101'] })).status,
+  (await call('boss@example.com', 'PUT', `/api/admin/volunteers/999/organizer`, { all: false, precincts: ['Alma'] })).status,
   404,
+);
+// Only precincts on the district's list (src/precincts.ts).
+assert.equal(
+  (await call('boss@example.com', 'PUT', `/api/admin/volunteers/${anna}/organizer`, { all: false, precincts: ['Nowhere Park'] })).status,
+  400,
 );
 const granted = await call('boss@example.com', 'PUT', `/api/admin/volunteers/${anna}/organizer`, {
   all: false,
-  precincts: [' 101 ', '101'],
+  precincts: [' alma ', 'ALMA'], // spelled as the list spells it, once
 });
-assert.deepEqual(granted.data as OrganizerGrant, { volunteerId: anna, all: false, precincts: ['101'] });
+assert.deepEqual(granted.data as OrganizerGrant, { volunteerId: anna, all: false, precincts: ['Alma'] });
 assert.equal(
-  (await call('boss@example.com', 'PUT', `/api/admin/volunteers/${carl}/organizer`, { all: true, precincts: ['205'] })).status,
+  (await call('boss@example.com', 'PUT', `/api/admin/volunteers/${carl}/organizer`, { all: true, precincts: ['Cairo'] })).status,
   200,
 );
 const list = (await call('boss@example.com', 'GET', '/api/admin/organizers')).data as OrganizerList;
 assert.deepEqual(list.grants, [
-  { volunteerId: anna, all: false, precincts: ['101'] },
+  { volunteerId: anna, all: false, precincts: ['Alma'] },
   { volunteerId: carl, all: true, precincts: [] },
 ]);
-assert.deepEqual(list.precincts, ['101', '102', '205']);
+assert.deepEqual(list.precincts, ['Alma', 'Arcadia', 'Cairo']);
 
 // The organizer is let into the admin pages and the organizer routes, and told what they organize.
-assert.deepEqual(((await call('anna@example.com', 'GET', '/api/me')).data as Me).organizes, { all: false, precincts: ['101'] });
+assert.deepEqual(((await call('anna@example.com', 'GET', '/api/me')).data as Me).organizes, { all: false, precincts: ['Alma'] });
 assert.equal((await call('anna@example.com', 'GET', '/admin/')).status, 200);
 // ...but not the site admin's: uploads, the geocoder, the audit log, settings, reset, grants.
 for (const [method, path] of [
@@ -125,12 +130,12 @@ for (const [method, path] of [
 
 // People found: an organizer sees their precincts and the ones with no precinct, nobody else's.
 const found = (await call('anna@example.com', 'GET', '/api/people?scope=all&limit=100')).data as PeoplePage;
-assert.deepEqual(new Set(found.people.map((p: Person) => p.precinct)), new Set(['101', '']));
+assert.deepEqual(new Set(found.people.map((p: Person) => p.precinct)), new Set(['Alma', '']));
 assert.equal(((await call('carl@example.com', 'GET', '/api/people?scope=all&limit=100')).data as PeoplePage).people.length, 8);
 
 // Moving: inside the precincts, and the blank one, yes; outside, no, and nothing changes.
-const [in101] = idsIn('101');
-const [in102] = idsIn('102');
+const [in101] = idsIn('Alma');
+const [in102] = idsIn('Arcadia');
 const [blank] = idsIn('');
 if (in101 === undefined || in102 === undefined || blank === undefined) throw new Error('no people');
 const move = (as: string, id: number, to: number | null) => call(as, 'POST', `/api/admin/people/${id}/assign`, { volunteerId: to });
@@ -141,7 +146,7 @@ assert.equal((await move('anna@example.com', in102, eve)).status, 403);
 assert.equal(assignedTo(in102), null);
 assert.equal((await move('dora@example.com', in101, dora)).status, 403);
 assert.equal((await move('carl@example.com', in102, eve)).status, 200);
-assert.equal((await move('boss@example.com', idsIn('205')[0] ?? 0, eve)).status, 200);
+assert.equal((await move('boss@example.com', idsIn('Cairo')[0] ?? 0, eve)).status, 200);
 
 // Flags: an organizer clears them only in their precincts.
 sqlite.prepare("UPDATE people SET flag = 'reappeared' WHERE id IN (?, ?)").run(in101, in102);
