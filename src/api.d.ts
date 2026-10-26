@@ -13,7 +13,8 @@ export interface Me {
   name: string;
   isAdmin: boolean;
   // The place the volunteer saved for "near me", rounded to about a mile; only they ever see it. null until they save one.
-  location: { lat: number; lon: number } | null;
+  // `near` says where that is in words (the town and ZIP of the nearest person waiting), when anyone is within 25 miles.
+  location: { lat: number; lon: number; near: string | null } | null;
 }
 
 export interface Volunteer {

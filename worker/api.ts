@@ -24,7 +24,7 @@ import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
-import { homeOf, inCountry, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
+import { homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import {
   finishStage,
   graceCycles,
@@ -191,6 +191,12 @@ function mayChange(c: Ctx, p: PersonRow): void {
 
 // ---- routes: everyone signed in
 
+// Where the volunteer saved themselves, with where that is in words.
+async function myLocation(c: Ctx): Promise<Me['location']> {
+  const home = await homeOf(c.db, c.me.id);
+  return home ? { ...home, near: await nearestTown(c.db, home) } : null;
+}
+
 // A volunteer is "seen" at most this often. Every page asks who is signed in, and a write on each page load is a row written for nothing, and a
 // page that cannot load when the database refuses writes (the free plan's daily limit).
 const SEEN_EVERY_MS = 5 * 60_000;
@@ -205,7 +211,7 @@ async function getMe(c: Ctx): Promise<Response> {
     // Being seen is not worth a page that does not load.
     console.warn('could not record last_seen_at', e);
   }
-  const me: Me = { ...c.me, isAdmin: c.isAdmin, location: await homeOf(c.db, c.me.id) };
+  const me: Me = { ...c.me, isAdmin: c.isAdmin, location: await myLocation(c) };
   return json(me);
 }
 
@@ -215,7 +221,7 @@ async function putMe(c: Ctx, _p: string[], body: Body): Promise<Response> {
     c.db.prepare('UPDATE volunteers SET name = ? WHERE id = ?').bind(name, c.me.id),
     auditStmt(c, 'volunteer.rename', null, { from: c.me.name, to: name }),
   ]);
-  const me: Me = { ...c.me, name, isAdmin: c.isAdmin, location: await homeOf(c.db, c.me.id) };
+  const me: Me = { ...c.me, name, isAdmin: c.isAdmin, location: await myLocation(c) };
   return json(me);
 }
 
@@ -249,7 +255,7 @@ async function putLocation(c: Ctx, _p: string[], body: Body): Promise<Response> 
     c.db.prepare('UPDATE volunteers SET home_lat = ?, home_lon = ? WHERE id = ?').bind(place?.lat ?? null, place?.lon ?? null, c.me.id),
     auditStmt(c, place ? 'location.set' : 'location.clear', null, place ? { via } : {}),
   ]);
-  return json({ location: place });
+  return json({ location: place ? { ...place, near: await nearestTown(c.db, place) } : null });
 }
 
 async function listVolunteers(c: Ctx): Promise<Response> {
