@@ -26,7 +26,7 @@ import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
-import { boxOf, pinsIn } from './map.ts';
+import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import { allGrants, type Grant, inScope, parseGrant, replaceGrant, type Scope, scopeOf, scopeWhere } from './organizers.ts';
 import {
@@ -443,8 +443,9 @@ const toAudit = (r: AuditRow): AuditEntry => ({
   detail: parseDetail(r.detail),
 });
 
-// The pins for the map: the open pool inside the box in the query (west, south, east, north), as [id, lat, lon, approximate], and whether the basemap file is there. Everyone sees
-// the pool already, so the map shows nothing the list does not.
+// The pins for the map: the open pool and the claimed people (not cured) inside the box in the query (west, south, east, north), as
+// [id, lat, lon, approximate, who has them], and whether the basemap file is there. Everyone sees the pool and every volunteer's list
+// already, so the map shows nothing the lists do not.
 async function mapPins(c: Ctx, _p: string[], _b: Body, url: URL): Promise<Response> {
   const box = boxOf(url.searchParams);
   if (!box) throw new HttpError(400, 'Send west, south, east and north: a box in the United States');
@@ -452,9 +453,10 @@ async function mapPins(c: Ctx, _p: string[], _b: Body, url: URL): Promise<Respon
   const narrowed = narrowBy(url, false);
   const near = await nearOf(c, url);
   if (near) narrowed.where.push(near.where);
-  const found = await pinsIn(c.db, box, narrowed);
+  const found = await pinsIn(c.db, box, narrowed, c.now);
   return json({
     ...found,
+    stalledDays: STALLED_DAYS,
     tiles: await c.tilesReady(),
     ...(url.searchParams.get('facets') === '1' && { facets: await savedFacets(c.db) }),
   });
@@ -471,8 +473,16 @@ async function getPerson(c: Ctx, p: string[]): Promise<Response> {
     .bind(id)
     .all<{ id: number; body: string; created_at: string; volunteer_id: number; name: string; email: string }>();
   const history = await c.db.prepare(`${AUDIT_SELECT} WHERE a.person_id = ? ORDER BY a.id DESC LIMIT 50`).bind(id).all<AuditRow>();
+  // Who has them, so volunteers working near each other can find one another (the map shows it), and when a volunteer last did anything.
+  const holder = person.assignedTo === null ? null : await volunteerById(c, person.assignedTo);
+  const last = await c.db
+    .prepare("SELECT MAX(at) AS at FROM audit WHERE person_id = ? AND action IN ('claim', 'assign', 'reassign', 'status', 'note')")
+    .bind(id)
+    .first<{ at: string | null }>();
   const detail: PersonDetail = {
     person,
+    claimedBy: holder,
+    lastActivityAt: holder === null ? null : (last?.at ?? null),
     notes: notes.results.map((n) => ({
       id: n.id,
       body: n.body,
