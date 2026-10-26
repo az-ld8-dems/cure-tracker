@@ -12,6 +12,8 @@ export interface Me {
   // Empty until the volunteer has said what to call them.
   name: string;
   isAdmin: boolean;
+  // The place the volunteer saved for "near me", rounded to about a mile; only they ever see it. null until they save one.
+  location: { lat: number; lon: number } | null;
 }
 
 export interface Volunteer {
@@ -41,6 +43,9 @@ export interface Person {
   assignedTo: number | null;
   flag: Flag | null;
   notesCount: number;
+  // Only in a "within N miles" search: how far, and whether that is a guess (the person has the middle of their ZIP, not their own place).
+  distanceMiles?: number;
+  approximate?: boolean;
 }
 
 // One page of GET /api/people. `hasMore` says there are people after this page (the page asks for one more than it shows, which is cheaper

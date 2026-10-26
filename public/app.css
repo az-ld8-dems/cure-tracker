@@ -307,7 +307,7 @@ h3 {
 @media (min-width: 48rem) {
   .pool-filters {
     grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
-    align-items: end;
+    align-items: start;
   }
 
   .pool-filters > .fl-disclosure {
@@ -372,6 +372,11 @@ th[aria-sort="ascending"] > .pool-sort::after {
 
 th[aria-sort="descending"] > .pool-sort::after {
   border-block-start: 5px solid currentcolor;
+}
+
+/* A field and the buttons beside it line up along their bottom edge, whatever the label above takes */
+.pool-near-row {
+  align-items: end;
 }
 
 /* A name with its badges under it, in a row of the table or of the compact list */

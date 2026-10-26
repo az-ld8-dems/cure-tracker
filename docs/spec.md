@@ -34,7 +34,13 @@ An admin presses **Look up addresses** (admin page, "Where people live"). The Wo
 
 **People the geocoder cannot place** (`geocode` is `no_match`, or `tie` when it found several places) are not sent again by a normal run. When a run ends, each of them is put at the middle of their ZIP, the average of the people the geocoder placed there, if at least five were, and marked `approximate = 1`; otherwise they have no place. The admin page lists them (50 at a time, with the reason and what they have for now), with a **Copy** button for each address and a download of the whole list as a CSV, for looking them up by hand. **Look up the unplaced again** sends only them again: one the geocoder now finds is placed exactly (no longer approximate); one it still cannot find keeps its guess. An upload that changes a person's address clears their coordinates and the approximate flag, so they are looked up again.
 
-**For the map:** approximate places are drawn as a different color of pin from exact ones, with a legend saying so (Avi's requirement). Nothing shows the coordinates yet; the map and the distance filter are next.
+**For the map:** approximate places are drawn as a different color of pin from exact ones, with a legend saying so (Avi's requirement). The map itself is still to come.
+
+### Near me
+
+On Find people a volunteer can save where they are, from their device (the browser asks first) or as the middle of a ZIP (the average of the people placed exactly there, if at least five). It is rounded to 0.01 degrees, about 0.7 mile, before it is stored, shown only to that volunteer (not in the volunteer list, not to admins), never written to the audit log (which says only that a place was saved or forgotten), and cleared with **Forget where I am**. With one saved, **Show people within 1, 3, 5, 10 or 25 miles** filters the pool, **Nearest first** sorts by distance, and each row shows how far ("0.4 mi", or "about 2.0 mi" for someone who only has the middle of their ZIP). A radius is required to sort by distance, because a distance sort over everyone would read the whole pool; the search reads a band of the map from an index on the pool's latitude and longitude (`people_pool_place`). People with no place at all never appear in a distance search; they are still in the plain list. Distances are great-circle distances (the haversine formula, in SQL), checked in the tests against a different formula.
+
+### What an upload does
 
 ### What an upload does
 
