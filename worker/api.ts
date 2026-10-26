@@ -1032,7 +1032,7 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
       const err: ApiError = e.problems.length > 0 ? { error: e.message, problems: e.problems } : { error: e.message };
       return json(err, e.status);
     }
-    console.error('api error', e);
+    console.error('api error', e instanceof Error ? `${e.name}: ${e.message}` : e, e);
     return json({ error: 'Something went wrong' } satisfies ApiError, 500);
   }
 }

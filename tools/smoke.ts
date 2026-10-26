@@ -340,11 +340,11 @@ try {
   await admin.getByText(/Write latitude, then longitude/).waitFor();
   await handRow.getByRole('button', { name: 'Take away the place of Nora Nowhere' }).click();
   await admin.getByText('Took away the place of Nora Nowhere.').waitFor();
-  expect(
-    'admin geocode',
-    /No place/.test((await unplacedTable.getByRole('row', { name: /Nora Nowhere/ }).textContent()) ?? ''),
-    'taken away, she has no place',
-  );
+  // The toast comes before the list is asked again, so wait for the row to change rather than read it at once.
+  await unplacedTable
+    .getByRole('row', { name: /Nora Nowhere/ })
+    .getByText(/No place/)
+    .waitFor();
   const [download] = await Promise.all([
     admin.waitForEvent('download'),
     admin.getByRole('button', { name: 'Download the list as a CSV' }).click(),
