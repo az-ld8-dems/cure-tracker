@@ -28,6 +28,14 @@ assert.equal(say('note'), 'added a note');
 assert.equal(say('assign', { from: null, to: 1 }), 'moved from the pool to Vera Vale');
 assert.equal(say('reassign', { from: 1, to: null, count: 1 }), 'moved 1 person from Vera Vale to the pool');
 assert.equal(say('reassign', { from: 1, to: null, count: 6 }), 'moved 6 people from Vera Vale to the pool');
+assert.equal(
+  say('organizer.set', { volunteer: 1, from: { all: false, precincts: [] }, to: { all: false, precincts: ['101', '102'] } }),
+  'changed what Vera Vale organizes: precincts 101, 102 (was nothing)',
+);
+assert.equal(
+  say('organizer.set', { volunteer: 1, from: { all: true, precincts: [] }, to: { all: false, precincts: [] } }),
+  'changed what Vera Vale organizes: nothing (was all precincts)',
+);
 assert.equal(say('flag.dismiss'), 'dismissed the flag');
 assert.equal(say('import.cured'), 'cured: no longer on the state’s sheet');
 assert.equal(say('import.still_uncured'), 'unsuccessful cure: still on the sheet after contact');

@@ -2,6 +2,7 @@
 // runs this, so the Worker never pays for parsing a large file (a free Worker has about 10 ms of CPU a request); Node runs it for the
 // tests and the dev server. Free of browser and Worker globals. Only erasable TypeScript syntax.
 import type { ColumnChoice, ColumnField, ColumnMap, ColumnPick } from './api.d.ts';
+import { canonicalPrecinct } from './precincts.ts';
 
 export class ImportError extends Error {
   problems: string[];
@@ -495,6 +496,12 @@ export function readSheet(text: string, saved: ColumnPick = {}, picked: ColumnPi
   const warnings: string[] = [];
   if (badDates > 0)
     warnings.push(`${badDates} status date${badDates > 1 ? 's could not be read and were' : ' could not be read and was'} left blank.`);
+  // A precinct that is not on the district's list cannot be given to an organizer, so the upload says which ones.
+  const unlisted = [...new Set(list.map((p) => p.precinct).filter((v) => v !== '' && canonicalPrecinct(v) === null))].sort();
+  if (unlisted.length > 0)
+    warnings.push(
+      `${unlisted.length} precinct${unlisted.length > 1 ? 's are' : ' is'} not on the list of LD8 precincts: ${unlisted.slice(0, 5).join(', ')}${unlisted.length > 5 ? `, and ${unlisted.length - 5} more` : ''}. Check how the sheet spells ${unlisted.length > 1 ? 'them' : 'it'}.`,
+    );
   const noCity = list.filter((p) => p.city === '').length;
   if (noCity > 0) warnings.push(`${noCity} address${noCity > 1 ? 'es' : ''} had no city this tool recognizes, so the city is blank.`);
   // Say what is blank because the file has no such column. The middle name is not worth a warning.

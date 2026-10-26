@@ -9,6 +9,8 @@ import type {
   ColumnMap,
   ColumnPick,
   GeocodeProgress,
+  OrganizerGrant,
+  OrganizerList,
   PeoplePage,
   Person,
   PossibleMatch,
@@ -40,6 +42,7 @@ import {
   toast,
   volunteerName,
 } from './common.ts';
+import { PRECINCTS } from './precincts.ts';
 import { describeColumns, ImportError } from './sheet.ts';
 import { finishSheet, mergeAndPlan, stageSheet } from './upload.ts';
 
@@ -53,9 +56,11 @@ const MATCH_WHY: Record<PossibleMatch['kind'], string> = {
 const me = await boot();
 const app = $('#app');
 
-if (me && !me.isAdmin) {
+if (me && !me.isAdmin && !me.organizes) {
   clear(app, banner('warn', h('p', {}, 'This page is for admins.')));
 } else if (me) {
+  // A site admin sees everything; a precinct organizer sees the numbers, the flagged people and the volunteers of their own precincts, and can move people.
+  const siteAdmin = me.isAdmin;
   let volunteers = new Map<number, Volunteer>();
   const sections = {
     upload: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-upload' }),
@@ -65,6 +70,7 @@ if (me && !me.isAdmin) {
     flagged: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-flagged' }),
     volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
     find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
+    organizers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-organizers' }),
     reset: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-reset' }),
     audit: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-audit' }),
   };
@@ -380,6 +386,117 @@ if (me && !me.isAdmin) {
     );
   }
 
+  // ---- who organizes which precincts
+  let organizerList: OrganizerList = { grants: [], precincts: [] };
+  let editingGrant: number | null = null;
+  function organizersSection(): void {
+    const known = new Set(organizerList.precincts.map((p) => p.toLowerCase()));
+    const grantOf = (id: number) => organizerList.grants.find((g) => g.volunteerId === id);
+    const words = (g: OrganizerGrant | undefined): string =>
+      g === undefined
+        ? 'Nothing'
+        : g.all
+          ? 'All precincts'
+          : g.precincts.map((p) => (known.has(p.toLowerCase()) ? p : `${p} (no one is in it)`)).join(', ');
+
+    const form = (v: Volunteer): HTMLElement => {
+      const g = grantOf(v.id);
+      const all = h('input', { id: 'grant-all', type: 'checkbox', checked: g?.all === true });
+      const list = h('input', {
+        class: 'fl-input',
+        id: 'grant-precincts',
+        type: 'text',
+        autocomplete: 'off',
+        list: 'grant-known',
+        maxlength: '2000',
+        value: g && !g.all ? g.precincts.join(', ') : '',
+      });
+      return h(
+        'form',
+        {
+          class: 'fl-card fl-stack fl-stack--3',
+          onsubmit: async (event: Event) => {
+            event.preventDefault();
+            const precincts = list.value
+              .split(',')
+              .map((t) => t.trim())
+              .filter((t) => t !== '');
+            try {
+              await api<OrganizerGrant>('PUT', `/api/admin/volunteers/${v.id}/organizer`, { all: all.checked, precincts });
+              toast(`Saved what ${volunteerName(v)} organizes.`);
+              editingGrant = null;
+              await refresh();
+            } catch (e) {
+              toast(failureText(e), 'error');
+            }
+          },
+        },
+        h('h3', {}, `What ${volunteerName(v)} organizes`),
+        h('label', { class: 'fl-check', for: 'grant-all' }, all, 'All precincts'),
+        field(
+          'grant-precincts',
+          'Or only these precincts',
+          list,
+          'Precincts of the district, separated with commas (the box suggests them). Leave it empty, with the box unchecked, to take the access away. People with no precinct can be moved by anyone who organizes.',
+        ),
+        h('datalist', { id: 'grant-known' }, ...PRECINCTS.map(([city, name]) => h('option', { value: name }, city))),
+        h(
+          'div',
+          { class: 'fl-cluster' },
+          h('button', { class: 'btn', type: 'submit' }, 'Save access'),
+          h(
+            'button',
+            {
+              class: 'fl-btn',
+              type: 'button',
+              onclick: () => {
+                editingGrant = null;
+                organizersSection();
+              },
+            },
+            'Cancel',
+          ),
+        ),
+      );
+    };
+
+    const editing = editingGrant === null ? undefined : volunteers.get(editingGrant);
+    clear(
+      sections.organizers,
+      heading('h-organizers', 'Who organizes precincts'),
+      h(
+        'p',
+        { class: 'fl-help' },
+        'A precinct organizer can move the people of their precincts to any volunteer and clear their flags. They cannot upload, delete or change who organizes. Site admins are set in the Worker secret and organize everything.',
+      ),
+      editing ? form(editing) : null,
+      volunteers.size === 0
+        ? h('p', { class: 'fl-help' }, 'Nobody has signed in yet.')
+        : table(
+            'Volunteers and what they organize',
+            ['Volunteer', 'Organizes', 'Change'],
+            [...volunteers.values()].map((v) => [
+              volunteerName(v),
+              words(grantOf(v.id)),
+              h(
+                'button',
+                {
+                  class: 'fl-btn fl-btn--sm',
+                  type: 'button',
+                  'aria-label': `Change what ${volunteerName(v)} organizes`,
+                  onclick: () => {
+                    editingGrant = v.id;
+                    organizersSection();
+                    $('#grant-all').focus();
+                  },
+                },
+                'Change',
+              ),
+            ]),
+          ),
+    );
+  }
+
   // ---- numbers and people
   // ---- where people live
   // Whether the list of unplaced people was open, so it stays open when the page draws itself again after a change.
@@ -626,9 +743,11 @@ if (me && !me.isAdmin) {
       h(
         'p',
         { class: 'fl-help' },
-        last
-          ? `Last upload: ${last.filename || `number ${last.id}`}, ${dateTime(last.createdAt)}, by ${last.uploadedBy}.`
-          : 'Nothing has been uploaded yet.',
+        !siteAdmin
+          ? null
+          : last
+            ? `Last upload: ${last.filename || `number ${last.id}`}, ${dateTime(last.createdAt)}, by ${last.uploadedBy}.`
+            : 'Nothing has been uploaded yet.',
       ),
     );
   }
@@ -859,28 +978,35 @@ if (me && !me.isAdmin) {
   }
 
   async function refresh(): Promise<void> {
-    const [stats, vols, firstPage, settings] = await Promise.all([
+    const [stats, vols, firstPage, settings, organizers] = await Promise.all([
       api<AdminStats>('GET', '/api/admin/stats'),
       loadVolunteers(),
-      api<AuditEntry[]>('GET', '/api/admin/audit?limit=50'),
-      api<AdminSettings>('GET', '/api/admin/settings'),
+      siteAdmin ? api<AuditEntry[]>('GET', '/api/admin/audit?limit=50') : null,
+      siteAdmin ? api<AdminSettings>('GET', '/api/admin/settings') : null,
+      siteAdmin ? api<OrganizerList>('GET', '/api/admin/organizers') : null,
     ]);
     volunteers = vols;
-    log = firstPage;
-    settingsSection(settings);
     statsSection(stats);
-    geocodeSection(stats);
     flaggedSection(stats);
     volunteersSection(stats);
     findSection();
-    resetSection(settings);
-    clear(sections.audit, heading('h-audit', 'Audit log'), logBody);
-    renderLog(firstPage.length === 50);
+    if (firstPage && settings && organizers) {
+      log = firstPage;
+      organizerList = organizers;
+      settingsSection(settings);
+      geocodeSection(stats);
+      organizersSection();
+      resetSection(settings);
+      clear(sections.audit, heading('h-audit', 'Audit log'), logBody);
+      renderLog(firstPage.length === 50);
+    }
   }
 
   try {
-    clear(app, ...Object.values(sections));
-    uploadSection();
+    const shown = siteAdmin ? Object.values(sections) : [sections.stats, sections.flagged, sections.volunteers, sections.find];
+    if (!siteAdmin) $('.lead').textContent = 'Check on volunteers and move the people of your precincts around.';
+    clear(app, ...shown);
+    if (siteAdmin) uploadSection();
     await refresh();
   } catch (e) {
     clear(app, banner('warn', h('p', {}, failureText(e))));

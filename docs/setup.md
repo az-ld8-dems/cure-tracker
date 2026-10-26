@@ -25,7 +25,7 @@ A later schema change is a new file in `db/migrations/`; run the same command ag
 5. Put them in `wrangler.jsonc` under `vars`: `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`. They are not secrets. While either is empty, the Worker refuses every request.
 6. Set the admins as a Worker secret, not in the repo: `npx wrangler secret put ADMIN_EMAILS` (if it offers to create the Worker first, say yes), and paste the admins' emails, comma-separated. It applies at once, with no deploy, and a later `wrangler deploy` keeps it. To change the admins, run the same command with the new list. While the secret is missing nobody is an admin: the admin pages and routes refuse everyone.
 
-Roles: an email in the Access policy is a volunteer; an email also in `ADMIN_EMAILS` is an admin. Adding a volunteer is adding their email to the policy; removing one is removing it (and, to end a session that has not expired, revoking it under Access, Users). Changing `ADMIN_EMAILS` is `wrangler secret put` again, not a deploy.
+Roles: an email in the Access policy is a volunteer; an email also in `ADMIN_EMAILS` is an admin. Adding a volunteer is adding their email to the policy; removing one is removing it (and, to end a session that has not expired, revoking it under Access, Users). Changing `ADMIN_EMAILS` is `wrangler secret put` again, not a deploy. Precinct organizers are not in the secret: a site admin gives a volunteer some or all precincts on the admin page, under "Who organizes precincts" (the volunteer must have signed in once). Apply migration 0010 (`npm run db:migrate`) before deploying.
 
 ## 3. Deploy
 

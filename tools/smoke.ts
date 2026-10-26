@@ -480,6 +480,39 @@ try {
   await check(admin, 'admin after a move');
   await admin.setViewportSize({ width: 375, height: 812 });
   await check(admin, 'admin (phone)');
+
+  // ---- a precinct organizer: shut out until an admin grants them precincts, then a trimmed admin page
+  const organizerCtx = await context('olive@example.com');
+  const organizer = await organizerCtx.newPage();
+  watch(organizer, 'organizer', [403]); // the admin page is refused with a 403 until the grant
+  await organizer.goto(`${base}/`);
+  await organizer.getByLabel('Your name').fill('Olive Organizer');
+  await organizer.getByRole('button', { name: 'Continue' }).click();
+  await organizer.getByRole('link', { name: 'Find people to call' }).waitFor();
+  expect(
+    'organizer',
+    !(await organizer.getByRole('link', { name: 'Admin', exact: true }).isVisible()),
+    'the Admin link is shown before a grant',
+  );
+  const refused = await organizer.goto(`${base}/admin/`);
+  expect('organizer', refused?.status() === 403, `the admin page answered ${refused?.status()} before a grant`);
+  await admin.setViewportSize({ width: 1280, height: 800 });
+  await admin.goto(`${base}/admin/`);
+  await admin.getByRole('heading', { name: 'Who organizes precincts' }).waitFor();
+  await check(admin, 'admin: who organizes');
+  await admin.getByRole('button', { name: 'Change what Olive Organizer organizes' }).click();
+  await check(admin, 'admin: change what a volunteer organizes');
+  await admin.getByLabel('All precincts').check();
+  await admin.getByRole('button', { name: 'Save access' }).click();
+  await admin.getByText('Saved what Olive Organizer organizes.').waitFor();
+  await organizer.goto(`${base}/`);
+  await organizer.getByRole('link', { name: 'Admin', exact: true }).click();
+  await organizer.getByRole('heading', { name: 'Where things stand' }).waitFor();
+  await organizer.getByRole('heading', { name: 'Find someone and move them' }).waitFor();
+  for (const only of ['Upload the state’s sheet', 'Who organizes precincts', 'Audit log', 'Unsuccessful cures'])
+    expect('organizer', (await organizer.getByRole('heading', { name: only }).count()) === 0, `${only} is shown to an organizer`);
+  await check(organizer, 'admin (organizer)');
+  await organizerCtx.close();
   await adminCtx.close();
 
   // ---- the data agrees with what the browser did

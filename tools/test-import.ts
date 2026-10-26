@@ -1,6 +1,7 @@
 // Checks src/sheet.ts (reading the state's sheet) and tools/lib/plan.ts (what an upload does to the people already known, the reference the
 // SQL in worker/uploads.ts is held to by test-upload-sql.ts). Pure functions, no database.
 import assert from 'node:assert/strict';
+import { canonicalPrecinct } from '../src/precincts.ts';
 import {
   addressKey,
   describeColumns,
@@ -157,6 +158,17 @@ assert.equal(ana.phone, '602-555-0101');
 const odd = readSheet('Address,extra,last,first\n"1 E MAIN ST TEMPE, AZ 85281",x,Ray,Bo\n');
 assert.equal(odd.people.length, 1);
 assert.ok(odd.warnings.some((w) => /status date/.test(w)));
+
+// Precincts the district's list (src/precincts.ts) does not have are named in a warning; ones it has, in any case, are not.
+const withPrecincts = readSheet(
+  'first,last,address,precinct\nAda,One,"1 E MAIN ST TEMPE, AZ 85281",alma\nBo,Two,"2 E MAIN ST TEMPE, AZ 85281",  CAIRO \nCy,Three,"3 E MAIN ST TEMPE, AZ 85281",Nowhere Park\nDi,Four,"4 E MAIN ST TEMPE, AZ 85281",\n',
+);
+assert.deepEqual(
+  withPrecincts.warnings.filter((w) => /precinct/.test(w)),
+  ['1 precinct is not on the list of LD8 precincts: Nowhere Park. Check how the sheet spells it.'],
+);
+assert.equal(canonicalPrecinct('  st   FRANCIS '), 'St Francis', 'names are compared ignoring case and extra spaces');
+assert.equal(canonicalPrecinct('Nowhere Park'), null);
 
 assert.throws(
   () => readSheet('FIRST,LAST\nA,B\n'),
