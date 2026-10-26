@@ -221,17 +221,15 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
   const searchingByDistance = (): boolean => place !== null && radius.value !== '';
   let lastRadius = '';
 
-  // What the box says and allows, given whether a place is saved and a radius picked.
-  function syncNear(): void {
+  // What the box says and allows, given whether a place is saved and a radius picked. Drawn when the filters are made, not when the choices
+  // arrive, so the box does not change height under a page that is already showing (a layout shift).
+  function drawNear(): void {
     radius.disabled = place === null;
     // With a place saved, the page says where it is and offers to change or forget it; without one (or while changing), the ways to save one.
     forget.hidden = place === null;
     change.hidden = place === null || changing;
     cancel.hidden = place === null;
     setPlace.hidden = place !== null && !changing;
-    const by = searchingByDistance();
-    onNear?.({ by, started: by && lastRadius === '' });
-    lastRadius = radius.value;
     nearStatus.className = place === null ? 'fl-help' : 'fl-note';
     nearStatus.textContent =
       place === null
@@ -242,6 +240,15 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
             ? `Where you are: near ${place.near}. Saved to about a mile; only you can see it.`
             : 'Where you are: saved, but no one waiting is within 25 miles of it. Only you can see it.';
   }
+
+  // The same, and tells the page whether a search by distance is on.
+  function syncNear(): void {
+    drawNear();
+    const by = searchingByDistance();
+    onNear?.({ by, started: by && lastRadius === '' });
+    lastRadius = radius.value;
+  }
+  drawNear();
 
   // Saves, or forgets, where the volunteer is: from their device, or the middle of a ZIP (the Worker works it out).
   async function savePlace(body: object): Promise<void> {

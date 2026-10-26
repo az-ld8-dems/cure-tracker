@@ -68,7 +68,7 @@ if (me) {
   const detail = h('div', { class: 'fl-stack fl-stack--3', id: 'picked', tabindex: '-1' });
   const youLegend = h(
     'li',
-    { hidden: true },
+    { hidden: me.location === null },
     h('span', { class: 'pin pin--you', 'aria-hidden': 'true' }),
     'You (the place you saved, to about a mile)',
   );
