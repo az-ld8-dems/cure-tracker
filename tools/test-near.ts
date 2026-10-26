@@ -103,7 +103,11 @@ for (const bad of [
 assert.equal((await meOf(vera)).location, null, 'none of those saved anything');
 
 const saved = (await putPlace(vera, { lat: 33.456789, lon: -112.0149 })).data as { location: { lat: number; lon: number } };
-assert.deepEqual(saved.location, { lat: 33.46, lon: -112.01 }, 'rounded to 0.01 degrees, about 0.7 mile, before it is stored');
+assert.deepEqual(
+  { lat: saved.location.lat, lon: saved.location.lon },
+  { lat: 33.46, lon: -112.01 },
+  'rounded to 0.01 degrees, about 0.7 mile, before it is stored',
+);
 assert.deepEqual(
   sqlite.prepare('SELECT home_lat AS lat, home_lon AS lon FROM volunteers WHERE email = ?').get(vera) && {
     ...sqlite.prepare('SELECT home_lat AS lat, home_lon AS lon FROM volunteers WHERE email = ?').get(vera),
@@ -111,7 +115,8 @@ assert.deepEqual(
   { lat: 33.46, lon: -112.01 },
   'and that is what the database holds',
 );
-assert.deepEqual((await meOf(vera)).location, { lat: 33.46, lon: -112.01 });
+const mine = (await meOf(vera)).location;
+assert.deepEqual({ lat: mine?.lat, lon: mine?.lon }, { lat: 33.46, lon: -112.01 });
 assert.equal((await meOf(walt)).location, null, 'someone else sees nothing of it');
 assert.deepEqual(
   Object.keys(((await call(vera, 'GET', '/api/volunteers')).data as object[])[0] ?? {}).sort(),
@@ -149,6 +154,21 @@ const everyone = sqlite
     approximate: Number(r.approximate) === 1,
     away: miles(home, { lat: Number(r.lat), lon: Number(r.lon) }),
   }));
+// where that is in words: the town and ZIP of the nearest person waiting
+const nearest = [...everyone].sort((a, b) => a.away - b.away)[0] ?? assert.fail('someone nearby');
+const nearestRow = sqlite.prepare('SELECT city, zip FROM people WHERE id = ?').get(nearest.id);
+const inWords = `${nearestRow?.city} ${nearestRow?.zip}`;
+assert.equal((await meOf(vera)).location?.near, inWords, 'the page can say where you are');
+assert.deepEqual(
+  ((await putPlace(vera, { lat: 33.46, lon: -112.01 })).data as { location: { near: string } }).location.near,
+  inWords,
+  'and so does saving it',
+);
+assert.match(inWords, /^[A-Za-z ]+ \d{5}$/);
+// a place with no one waiting within 25 miles has no words, but is still saved
+const empty = (await putPlace(walt, { lat: 36.5, lon: -112.0 })).data as { location: { lat: number; near: string | null } };
+assert.deepEqual([empty.location.lat, empty.location.near], [36.5, null]);
+await putPlace(walt, { zip: '85018' });
 for (const radius of [1, 3, 5, 10]) {
   const got = { people: await allOf(vera, `?miles=${radius}&sort=distance`) };
   const gotIds = new Set(got.people.map((p) => p.id));

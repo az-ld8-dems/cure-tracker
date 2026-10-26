@@ -48,6 +48,18 @@ export function milesBetween(a: Place, b: Place): number {
   return 2 * EARTH_MILES * Math.asin(Math.sqrt(Math.min(1, h)));
 }
 
+// The town of the nearest person in the pool within 25 miles of a place, as "Phoenix 85018", so a volunteer can be told where they are in words.
+// null when no one waiting is that close. Reads a band of the map through the (lat, lon) index.
+export async function nearestTown(db: Db, home: Place): Promise<string | null> {
+  const { where, away } = nearSql(home, 25);
+  const row = await db
+    .prepare(
+      `SELECT p.city, p.zip FROM people p WHERE p.assigned_to IS NULL AND p.status != 'cured' AND ${where} ORDER BY ${away}, p.id LIMIT 1`,
+    )
+    .first<{ city: string; zip: string }>();
+  return row ? [row.city, row.zip].filter((v) => v !== '').join(' ') || null : null;
+}
+
 // The place a volunteer saved, or null.
 export async function homeOf(db: Db, volunteerId: number): Promise<Place | null> {
   const row = await db

@@ -131,7 +131,15 @@ try {
   await page.getByLabel('or the middle of a ZIP').fill('85018');
   await page.getByRole('button', { name: 'Use this ZIP' }).click();
   await page.getByText('Saved where you are.').waitFor();
-  await page.getByText(/Where you are: saved/).waitFor();
+  // Saved: the page says where you are, and the ways to save a place are gone.
+  await page.getByText(/Where you are: near .*\d{5}\. Saved to about a mile/).waitFor();
+  expect(
+    'near me',
+    !(await page.getByRole('button', { name: 'Use my location' }).isVisible()),
+    'the device button goes once a place is saved',
+  );
+  expect('near me', !(await page.getByLabel('or the middle of a ZIP').isVisible()), 'and so does the ZIP box');
+  expect('near me', await page.getByRole('button', { name: 'Change' }).isVisible(), 'a place can be changed');
   await page.locator('.pool-row').first().waitFor();
   expect('near me', (await page.getByLabel('Show people').inputValue()) === '10', 'ten miles was picked');
   expect('near me', (await page.getByLabel('Sort by').inputValue()) === 'distance', 'nearest first was picked');
@@ -140,11 +148,20 @@ try {
   // The device's location works the same way.
   await ctx.grantPermissions(['geolocation'], { origin: base });
   await ctx.setGeolocation({ latitude: 33.4567, longitude: -112.0149 });
+  await page.getByRole('button', { name: 'Change' }).click();
+  await page.getByText(/Choose a new place below/).waitFor();
+  expect('near me', await page.getByLabel('or the middle of a ZIP').isVisible(), 'Change brings the ways to save one back');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  expect('near me', !(await page.getByLabel('or the middle of a ZIP').isVisible()), 'and Cancel puts them away');
+  await page.getByRole('button', { name: 'Change' }).click();
   await page.getByRole('button', { name: 'Use my location' }).click();
   await page.getByText('Saved where you are.').last().waitFor();
+  await page.getByText(/Where you are: near .*\d{5}\. Saved to about a mile/).waitFor();
   // Forgetting it puts everything back.
   await page.getByRole('button', { name: 'Forget where I am' }).click();
   await page.getByText('Forgot where you are.').waitFor();
+  await page.getByText(/Where you are: not saved/).waitFor();
+  expect('near me', await page.getByLabel('or the middle of a ZIP').isVisible(), 'forgetting brings the ways to save one back');
   expect(
     'near me',
     (await page.getByLabel('Show people').inputValue()) === '' && (await page.getByLabel('Sort by').inputValue()) === 'days',

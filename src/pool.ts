@@ -89,8 +89,55 @@ if (me) {
   });
   const nearStatus = h('p', { class: 'fl-help', role: 'status' });
   const forget = h('button', { class: 'fl-btn', type: 'button', onclick: () => void savePlace({ clear: true }) }, 'Forget where I am');
+  // Once a place is saved the ways to save one go away, and the page says where it is; "Change" brings them back.
+  let changing = false;
+  const change = h(
+    'button',
+    {
+      class: 'fl-btn',
+      type: 'button',
+      onclick: () => {
+        changing = true;
+        syncRadius();
+        zip.focus();
+      },
+    },
+    'Change',
+  );
+  const cancel = h(
+    'button',
+    {
+      class: 'fl-btn',
+      type: 'button',
+      onclick: () => {
+        changing = false;
+        syncRadius();
+        change.focus();
+      },
+    },
+    'Cancel',
+  );
   // The other filters sit in a disclosure on a phone. Where there is room it stays open, its summary is hidden, and they share a row with
   // the search box (app.css).
+  // The ways to save where you are: the device's location, or the middle of a ZIP.
+  const setPlace = h(
+    'div',
+    { class: 'fl-cluster pool-near-row' },
+    h('button', { class: 'fl-btn', type: 'button', onclick: () => here() }, 'Use my location'),
+    h(
+      'form',
+      {
+        class: 'fl-cluster pool-near-row',
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          void savePlace({ zip: zip.value.trim() });
+        },
+      },
+      field('zip', 'or the middle of a ZIP', zip),
+      h('button', { class: 'fl-btn', type: 'submit' }, 'Use this ZIP'),
+    ),
+    cancel,
+  );
   const filters = h(
     'details',
     { class: 'fl-disclosure' },
@@ -111,25 +158,8 @@ if (me) {
         'div',
         { class: 'fl-stack fl-stack--3' },
         nearStatus,
-        h(
-          'div',
-          { class: 'fl-cluster pool-near-row' },
-          field('radius', 'Show people', radius),
-          h('button', { class: 'fl-btn', type: 'button', onclick: () => here() }, 'Use my location'),
-          h(
-            'form',
-            {
-              class: 'fl-cluster pool-near-row',
-              onsubmit: (e: Event) => {
-                e.preventDefault();
-                void savePlace({ zip: zip.value.trim() });
-              },
-            },
-            field('zip', 'or the middle of a ZIP', zip),
-            h('button', { class: 'fl-btn', type: 'submit' }, 'Use this ZIP'),
-          ),
-          forget,
-        ),
+        h('div', { class: 'fl-cluster pool-near-row' }, field('radius', 'Show people', radius), change, forget),
+        setPlace,
       ),
     ),
   );
@@ -214,7 +244,11 @@ if (me) {
   // What the page says and allows, given whether a place is saved and a radius picked: nearest first needs both.
   function syncRadius(): void {
     radius.disabled = place === null;
+    // With a place saved, the page says where it is and offers to change or forget it; without one (or while changing), the ways to save one.
     forget.hidden = place === null;
+    change.hidden = place === null || changing;
+    cancel.hidden = place === null;
+    setPlace.hidden = place !== null && !changing;
     const by = searchingByDistance();
     const nearest = sort.querySelector<HTMLOptionElement>('option[value="distance"]');
     if (nearest) nearest.disabled = !by;
@@ -223,10 +257,15 @@ if (me) {
     if (!by && sort.value === 'distance') sort.value = 'days';
     lastRadius = radius.value;
     awayHead.hidden = !by;
+    nearStatus.className = place === null ? 'fl-help' : 'fl-note';
     nearStatus.textContent =
       place === null
         ? 'Where you are: not saved. Save it to see who is closest. It is kept to about a mile, only you can see it, and you can forget it any time.'
-        : 'Where you are: saved, to about a mile. Only you can see it.';
+        : changing
+          ? `Where you are: ${place.near ? `near ${place.near}` : 'saved'}. Choose a new place below.`
+          : place.near
+            ? `Where you are: near ${place.near}. Saved to about a mile; only you can see it.`
+            : 'Where you are: saved, but no one waiting is within 25 miles of it. Only you can see it.';
   }
   let lastRadius = '';
 
@@ -235,9 +274,13 @@ if (me) {
     try {
       place = (await api<{ location: Me['location'] }>('PUT', '/api/me/location', body)).location;
       toast(place ? 'Saved where you are.' : 'Forgot where you are.');
+      changing = false;
+      zip.value = '';
       if (place === null) radius.value = '';
       else if (radius.value === '') radius.value = '10';
       syncRadius();
+      // The buttons that were pressed have gone: leave the keyboard somewhere that is still there.
+      (place ? change : zip).focus();
       await reload(true);
     } catch (e) {
       toast(failureText(e), 'error');
