@@ -3,7 +3,7 @@
 // write nothing, an upload that changes an address sends that person again, and a change made while the Census was thinking is not
 // overwritten. Synthetic data only.
 import assert from 'node:assert/strict';
-import type { AdminStats, GeocodeProgress } from '../src/api.d.ts';
+import type { AdminStats, GeocodeProgress, UnplacedPage } from '../src/api.d.ts';
 import { parseCsv } from '../src/sheet.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { GEOCODE_CHUNK } from '../worker/geocode.ts';
@@ -47,16 +47,19 @@ const run = async (after = 0) => {
   return r.data as GeocodeProgress;
 };
 
-// 450 people, with phones and names that must never leave, and three the geocoder cannot place or cannot decide about.
+// 452 people, with phones and names that must never leave, and four the geocoder cannot place or cannot decide about: two in ZIPs where
+// plenty of others are placed, and one in a ZIP where only one other is placed, so a middle would be that person's house.
 const base: SheetPerson[] = [
   ...syntheticPeople(447).map((p, i) => ({ ...p, phone: `602-555-01${String(i % 100).padStart(2, '0')}` })),
   { first: 'Nora', last: 'Nowhere', address: '1 NOWHERE LN TEMPE, AZ 85281', phone: '602-555-0150' },
   { first: 'Tia', last: 'Tied', address: '2 TIE ST MESA, AZ 85201', phone: '602-555-0151' },
   { first: 'Una', last: 'Unit', address: '3 E MAIN ST APT 4 PHOENIX, AZ 85018', phone: '602-555-0152' },
+  { first: 'Lou', last: 'Lost', address: '4 NOWHERE RD PRESCOTT, AZ 85999', phone: '602-555-0153' },
+  { first: 'Pat', last: 'Placed', address: '7 W ELM ST PRESCOTT, AZ 85999', phone: '602-555-0154' },
 ];
 await uploadCsv(sendAs(admin), sheetCsv(base), { filename: 'day1.csv' });
 const people = Number(sqlite.prepare('SELECT COUNT(*) AS n FROM people').get()?.n);
-assert.equal(people, 450);
+assert.equal(people, 452);
 
 // --- only admins
 assert.equal((await call(vera, 'POST', '/api/admin/geocode', { after: 0 })).status, 403);
@@ -66,7 +69,7 @@ assert.equal(census.sent.length, 0, 'nothing was sent for those');
 
 // --- what the admin is told before anything is sent: the next few lines, an id and an address
 const before = await stats();
-assert.deepEqual([before.geocode.waiting, before.geocode.matched, before.geocode.unmatched], [450, 0, 0]);
+assert.deepEqual([before.geocode.waiting, before.geocode.matched, before.geocode.approximate, before.geocode.unmatched], [452, 0, 0, 0]);
 assert.equal(before.geocode.sample.length, 3);
 for (const line of before.geocode.sample) assert.equal(parseCsv(line)[0]?.length, 5, `an id, street, city, state and ZIP: ${line}`);
 
@@ -76,9 +79,14 @@ assert.deepEqual([first.sent, first.next === null], [GEOCODE_CHUNK, false], 'a f
 const second = await run(first.next ?? 0);
 assert.equal(second.sent, GEOCODE_CHUNK);
 const third = await run(second.next ?? 0);
-assert.deepEqual([third.sent, third.next], [50, null], 'the last chunk ends it');
+assert.deepEqual([third.sent, third.next], [52, null], 'the last chunk ends it');
+assert.deepEqual(
+  [first.approximated, second.approximated, third.approximated],
+  [0, 0, 2],
+  'at the end, the two in busy ZIPs get the middle of their ZIP',
+);
 assert.equal(census.sent.length, 3);
-assert.equal(first.matched + second.matched + third.matched + first.noMatch + second.noMatch + third.noMatch, 450, 'everyone was answered');
+assert.equal(first.matched + second.matched + third.matched + first.noMatch + second.noMatch + third.noMatch, 452, 'everyone was answered');
 assert.equal(first.unanswered + second.unanswered + third.unanswered, 0);
 
 // --- only an address leaves: five fields a line, no name, no phone, no note
@@ -90,7 +98,7 @@ for (const request of census.sent) {
     assert.equal(fields.length, 5, line);
     assert.equal(fields[3], 'AZ');
     assert.match(fields[0] ?? '', /^\d+$/);
-    assert.doesNotMatch(line, /555-01|Nora|Tia|Una|Nowhere|Tied/, `no name or phone in ${line}`);
+    assert.doesNotMatch(line, /555-01|Nora|Tia|Una|Lou|Nowhere|Tied|Lost/, `no name or phone in ${line}`);
   }
 }
 const apt = census.sent.flatMap((r) => r.lines).find((l) => l.includes('MAIN ST APT 4'));
@@ -100,25 +108,38 @@ assert.equal(parseCsv(apt ?? '')[0]?.[2], 'Phoenix', 'and the city is the sheetâ
 // --- what was stored
 const after = await stats();
 assert.deepEqual(
-  [after.geocode.waiting, after.geocode.matched, after.geocode.unmatched],
-  [0, 448, 2],
-  'waiting, placed, and the two it could not place',
+  [after.geocode.waiting, after.geocode.matched, after.geocode.approximate, after.geocode.unmatched],
+  [0, 449, 2, 3],
+  'waiting, placed exactly, placed roughly, and the three the geocoder could not place',
 );
-const one = sqlite.prepare("SELECT lat, lon, geocode, geocoded_at FROM people WHERE geocode = 'match' LIMIT 1").get();
+const one = sqlite.prepare("SELECT lat, lon, geocode, geocoded_at, approximate FROM people WHERE geocode = 'match' LIMIT 1").get();
 assert.ok(
   Number(one?.lat) > 33 && Number(one?.lat) < 34 && Number(one?.lon) < -111 && Number(one?.lon) > -113,
   'longitude comes first in the Census answer',
 );
 assert.equal(one?.geocoded_at, clock.toISOString());
+assert.equal(one?.approximate, 0);
+// The two in busy ZIPs sit at the middle of their ZIP (the average of the people the geocoder placed there); the third stays unplaced.
+const middleOf = (zip: string) =>
+  sqlite.prepare("SELECT AVG(lat) AS lat, AVG(lon) AS lon FROM people WHERE zip = ? AND geocode = 'match'").get(zip);
+const placeOf = (first: string) => sqlite.prepare('SELECT geocode, lat, lon, approximate FROM people WHERE first_name = ?').get(first);
+for (const [first, zip, why] of [
+  ['Nora', '85281', 'no_match'],
+  ['Tia', '85201', 'tie'],
+] as const) {
+  const place = placeOf(first);
+  const middle = middleOf(zip);
+  assert.equal(place?.geocode, why, `${first} is still marked as the geocoder said`);
+  assert.equal(place?.approximate, 1, `${first} is approximate`);
+  assert.ok(
+    Math.abs(Number(place?.lat) - Number(middle?.lat)) < 1e-9 && Math.abs(Number(place?.lon) - Number(middle?.lon)) < 1e-9,
+    `${first} is at the middle of ${zip}`,
+  );
+}
 assert.deepEqual(
-  sqlite
-    .prepare("SELECT first_name, geocode, lat FROM people WHERE geocode != 'match' ORDER BY first_name")
-    .all()
-    .map((r) => [r.first_name, r.geocode, r.lat]),
-  [
-    ['Nora', 'no_match', null],
-    ['Tia', 'tie', null],
-  ],
+  [placeOf('Lou')?.geocode, placeOf('Lou')?.lat, placeOf('Lou')?.approximate],
+  ['no_match', null, 0],
+  'one placed person in its ZIP is not enough for a middle: not placed at all',
 );
 const audits = sqlite
   .prepare("SELECT detail FROM audit WHERE action = 'geocode'")
@@ -127,13 +148,74 @@ const audits = sqlite
 assert.equal(audits.length, 3, 'each request is in the log');
 assert.equal(
   audits.reduce((n, d) => n + d.sent, 0),
-  450,
+  452,
 );
 
 // --- nobody is sent twice
 const again = await run();
 assert.deepEqual([again.sent, again.next], [0, null]);
 assert.equal(census.sent.length, 3, 'a second run sends nothing');
+
+// --- the list an admin looks the unplaced up from
+assert.equal((await call(vera, 'GET', '/api/admin/geocode/unplaced')).status, 403);
+assert.equal((await call(admin, 'GET', '/api/admin/geocode/unplaced?after=-1')).status, 400);
+const list = (await call(admin, 'GET', '/api/admin/geocode/unplaced')).data as UnplacedPage;
+assert.deepEqual(
+  list.people.map((p) => [p.name, p.reason, p.approximate]),
+  [
+    ['Lou Lost', 'no_match', false],
+    ['Nora Nowhere', 'no_match', true],
+    ['Tia Tied', 'tie', true],
+  ],
+  'in id order, with what they have for now',
+);
+assert.equal(list.people.find((p) => p.name === 'Nora Nowhere')?.address, '1 NOWHERE LN TEMPE, AZ 85281');
+assert.equal(list.next, null);
+// more than a page: 50 at a time, each page starting where the last ended
+sqlite.exec("UPDATE people SET geocode = 'no_match' WHERE id <= 120 AND geocode = 'match'");
+const page1 = (await call(admin, 'GET', '/api/admin/geocode/unplaced')).data as UnplacedPage;
+const page2 = (await call(admin, 'GET', `/api/admin/geocode/unplaced?after=${page1.next}`)).data as UnplacedPage;
+const page3 = (await call(admin, 'GET', `/api/admin/geocode/unplaced?after=${page2.next}`)).data as UnplacedPage;
+assert.deepEqual([page1.people.length, page2.people.length, page1.next === null, page3.next], [50, 50, false, null]);
+assert.equal(
+  new Set([...page1.people, ...page2.people, ...page3.people].map((p) => p.id)).size,
+  page1.people.length + page2.people.length + page3.people.length,
+  'no one twice',
+);
+sqlite.exec("UPDATE people SET geocode = 'match' WHERE id <= 120 AND geocode = 'no_match' AND approximate = 0 AND lat IS NOT NULL");
+
+// --- looking the unplaced up again: still unplaced, they keep the middle of their ZIP; found, they get the place
+const guess = placeOf('Nora');
+const asked = census.sent.length;
+const stillNot = await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });
+assert.equal(stillNot.status, 200);
+assert.deepEqual(
+  [(stillNot.data as GeocodeProgress).sent, (stillNot.data as GeocodeProgress).matched],
+  [3, 0],
+  'only the unplaced are sent again',
+);
+assert.equal(census.sent.length, asked + 1);
+assert.deepEqual(placeOf('Nora'), guess, 'a miss does not take the guess away');
+census.behavior.matchEverything = true;
+const found = (await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true })).data as GeocodeProgress;
+census.behavior.matchEverything = false;
+assert.deepEqual([found.sent, found.matched], [3, 3]);
+const nora = placeOf('Nora');
+assert.deepEqual([nora?.geocode, nora?.approximate], ['match', 0], 'found: placed exactly now');
+assert.notEqual(nora?.lat, guess?.lat, 'at the place the geocoder found, not the middle of the ZIP');
+const settled = (await stats()).geocode;
+assert.deepEqual([settled.matched, settled.approximate, settled.unmatched], [452, 0, 0]);
+assert.match(
+  String(sqlite.prepare("SELECT detail FROM audit WHERE action = 'geocode' ORDER BY id DESC LIMIT 1").get()?.detail),
+  /"retry":true/,
+  'the log says it was a retry',
+);
+// put them back as they were for what follows
+sqlite
+  .prepare("UPDATE people SET geocode = 'no_match', lat = ?, lon = ?, approximate = 1 WHERE first_name = 'Nora'")
+  .run(Number(guess?.lat), Number(guess?.lon));
+sqlite.prepare("UPDATE people SET geocode = 'tie', lat = NULL, lon = NULL, approximate = 0 WHERE first_name = 'Tia'").run();
+sqlite.prepare("UPDATE people SET geocode = 'no_match', lat = NULL, lon = NULL, approximate = 0 WHERE first_name = 'Lou'").run();
 
 // --- a failure writes nothing, and a run goes on where it stopped
 await uploadCsv(
@@ -175,7 +257,14 @@ assert.equal((await run()).sent, 0);
 assert.ok(!census.sent.flatMap((r) => r.lines).some((l) => l.includes('12 W ELM')), 'and was never sent');
 
 // --- an upload that changes an address sends that person again; one that does not, leaves them be
-const moved = base.map((p) => (p.first === 'Una' ? { ...p, address: '3 E MAIN ST APT 4 TEMPE, AZ 85281' } : p));
+// Una moves, and so does Nora, who has the middle of her ZIP for now: the guess goes with the old address.
+const moved = base.map((p) =>
+  p.first === 'Una'
+    ? { ...p, address: '3 E MAIN ST APT 4 TEMPE, AZ 85281' }
+    : p.first === 'Nora'
+      ? { ...p, address: '1 NOWHERE LN TEMPE, AZ 85282' }
+      : p,
+);
 await uploadCsv(
   sendAs(admin),
   sheetCsv([
@@ -186,15 +275,20 @@ await uploadCsv(
   { filename: 'day3.csv' },
 );
 const una = sqlite.prepare("SELECT lat, geocode FROM people WHERE first_name = 'Una'").get();
+assert.deepEqual(
+  Object.values(sqlite.prepare("SELECT lat, geocode, approximate FROM people WHERE first_name = 'Nora'").get() ?? {}),
+  [null, null, 0],
+  'a new address takes the guess away too: the person is waiting to be looked up again',
+);
 assert.deepEqual([una?.lat, una?.geocode], [null, null], 'a new address clears the old coordinates');
 assert.equal(
   Number(sqlite.prepare("SELECT COUNT(*) AS n FROM people WHERE geocode = 'match'").get()?.n),
-  449,
+  450,
   'everyone else keeps theirs',
 );
 const sentBefore = census.sent.length;
 const moreRun = await run();
-assert.equal(moreRun.sent, 1, 'only Una');
+assert.equal(moreRun.sent, 2, 'only Una and Nora, whose addresses changed');
 assert.equal(census.sent.length, sentBefore + 1);
 
 // --- an address that changed while the Census was thinking is not overwritten with the old place
