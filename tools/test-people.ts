@@ -73,6 +73,14 @@ const withFacets = await page(vera, '?facets=1');
 assert.equal(withFacets.facets?.precincts.length, 12);
 assert.deepEqual(withFacets.facets?.parties, ['DEM', 'IND', 'REP']);
 assert.ok(withFacets.facets?.cities.includes('Tempe'));
+// Each city's precincts are the ones its people are in, and every precinct is under some city.
+const everyoneOpen = (await page(vera, '?limit=200')).people;
+const byCity = withFacets.facets?.precinctsByCity ?? {};
+for (const city of withFacets.facets?.cities ?? []) {
+  const want = [...new Set(everyoneOpen.filter((p) => p.city === city && p.precinct !== '').map((p) => p.precinct))].sort();
+  assert.deepEqual(byCity[city] ?? [], want, `the precincts of ${city}`);
+}
+assert.deepEqual([...new Set(Object.values(byCity).flat())].sort(), withFacets.facets?.precincts, 'every precinct is in some city');
 
 const tempe = await page(vera, '?city=tempe&limit=200');
 assert.equal(tempe.people.length, 24, 'a city matches whole, in any case');
@@ -177,6 +185,9 @@ assert.deepEqual(withFacets.facets, stored, 'a page reads what the upload stored
 sqlite.prepare("DELETE FROM settings WHERE key = 'facets'").run();
 assert.equal((await page(vera, '?facets=1')).facets?.precincts.length, 12, 'missing, they are worked out once');
 assert.ok(sqlite.prepare("SELECT 1 FROM settings WHERE key = 'facets'").get(), 'and stored');
+// Facets stored before the precincts by city existed are worked out again, not served without them.
+sqlite.prepare("UPDATE settings SET value = json_remove(value, '$.precinctsByCity') WHERE key = 'facets'").run();
+assert.deepEqual((await page(vera, '?facets=1')).facets?.precinctsByCity, byCity, 'an older stored value is replaced');
 
 // --- an upload writes only the people who changed
 const upload2 = await uploadCsv(sendAs(admin), sheetCsv(sheet), { filename: 'day2.csv' });

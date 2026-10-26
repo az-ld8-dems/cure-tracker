@@ -54,7 +54,7 @@ export interface Person {
 export interface PeoplePage {
   people: Person[];
   hasMore: boolean;
-  facets?: { cities: string[]; parties: string[]; precincts: string[] };
+  facets?: { cities: string[]; parties: string[]; precincts: string[]; precinctsByCity: Record<string, string[]> };
 }
 
 export interface Note {

@@ -326,19 +326,37 @@ h3 {
     align-items: start;
   }
 
-  .pool-filters > .fl-disclosure {
+  .pool-filters > .fl-disclosure:not(.pool-near) {
     padding: 0;
     border: 0;
     background: none;
   }
 
-  .pool-filters > .fl-disclosure > summary {
+  .pool-filters > .fl-disclosure:not(.pool-near) > summary {
     display: none;
   }
 
   .pool-filters .fl-toolbar {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+
+  /* Near me is a framed box under the whole row, not tucked under the filters' columns. */
+  .pool-filters > .pool-near {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The precinct matches float under their field. In Frostline's own layout the open list adds to the field's height and the row, which lines up
+   along its bottom edge, drops every other control. Out of the flow, the row stays put. */
+.pool-combo {
+  position: relative;
+}
+
+.pool-popover {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 100%;
+  z-index: 2;
 }
 
 /* A person's name is a row header, which Frostline styles like a column header (small, spaced, muted). Here it is the row's main text. */
