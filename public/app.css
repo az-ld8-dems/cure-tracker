@@ -551,3 +551,44 @@ th[aria-sort="descending"] > .pool-sort::after {
   background: var(--pin-you);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pin-you) 35%, transparent);
 }
+
+/* A combobox list that floats (floatingList in common.ts sets where): over the table, whose sideways scroll would clip anything inside it. */
+.fl-combobox__list.combo-float {
+  position: fixed;
+  z-index: 10;
+  margin: var(--space-1) 0 0;
+}
+
+.fl-combobox__list.combo-float--up {
+  margin: 0 0 var(--space-1);
+}
+
+/* A field with its choices inside it: they wrap, and the box you type in takes what room is left. It looks like an input and shows focus
+   when the one inside it has it. */
+.tag-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  cursor: text;
+}
+
+.tag-field:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.tag-field__input {
+  flex: 1 1 10rem;
+  min-inline-size: 0;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}

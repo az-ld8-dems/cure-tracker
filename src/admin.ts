@@ -33,6 +33,7 @@ import {
   failureText,
   field,
   flagBadge,
+  floatingList,
   h,
   loadVolunteers,
   personName,
@@ -404,46 +405,51 @@ if (me && !me.isAdmin && !me.organizes) {
     const form = (v: Volunteer): HTMLElement => {
       const g = grantOf(v.id);
       const all = h('input', { id: 'grant-all', type: 'checkbox', checked: g?.all === true });
-      // The precincts so far, as buttons that take one away; the box finds the next one on the district's list.
+      // The precincts so far are buttons inside the box that take one away; what is typed finds the next one on the district's list.
       let chosen = g && !g.all ? [...g.precincts] : [];
-      const chips = h('ul', { class: 'fl-cluster', 'aria-label': 'Chosen precincts' });
-      const showChosen = (): void => {
-        clear(
-          chips,
-          ...chosen.map((name) =>
-            h(
-              'li',
-              {},
-              h(
-                'button',
-                {
-                  class: 'fl-chip',
-                  type: 'button',
-                  'aria-label': `Remove ${name}`,
-                  onclick: () => {
-                    chosen = chosen.filter((c) => c !== name);
-                    showChosen();
-                  },
-                },
-                `${name} ×`,
-              ),
-            ),
-          ),
-        );
-        chips.hidden = chosen.length === 0;
-      };
-      showChosen();
-      const list = h('input', {
-        class: 'fl-input',
+      const typed = h('input', {
+        class: 'tag-field__input',
         id: 'grant-precincts',
         type: 'text',
         autocomplete: 'off',
-        placeholder: 'Type a precinct or a city',
+        placeholder: chosen.length === 0 ? 'Type a precinct or a city' : '',
       });
-      // The combobox puts its list after the input, which is not in the page yet, so the list is made here and placed with the input.
-      const matches = h('ul', {});
-      window.Frostline.combobox(list, {
-        list: matches,
+      const box = h('div', { class: 'tag-field', role: 'group', 'aria-label': 'Chosen precincts' }, typed);
+      const showChosen = (): void => {
+        for (const old of box.querySelectorAll('.fl-chip')) old.remove();
+        typed.before(
+          ...chosen.map((name) =>
+            h(
+              'button',
+              {
+                class: 'fl-chip',
+                type: 'button',
+                'aria-label': `Remove ${name}`,
+                onclick: () => {
+                  chosen = chosen.filter((c) => c !== name);
+                  showChosen();
+                  typed.focus();
+                },
+              },
+              `${name} ×`,
+            ),
+          ),
+        );
+        typed.placeholder = chosen.length === 0 ? 'Type a precinct or a city' : '';
+      };
+      showChosen();
+      // Pressing the empty part of the box types into it, and Backspace in an empty box takes the last one away.
+      box.addEventListener('click', (event) => {
+        if (event.target === box) typed.focus();
+      });
+      typed.addEventListener('keydown', (event) => {
+        if (event.key === 'Backspace' && typed.value === '' && chosen.length > 0) {
+          chosen = chosen.slice(0, -1);
+          showChosen();
+        }
+      });
+      window.Frostline.combobox(typed, {
+        list: floatingList(typed, box),
         label: 'Precincts of the district',
         openOnFocus: true,
         options: (query) => {
@@ -486,10 +492,9 @@ if (me && !me.isAdmin && !me.organizes) {
         field(
           'grant-precincts',
           'Or only these precincts',
-          h('div', { class: 'fl-stack fl-stack--3' }, list, matches),
+          box,
           'Pick precincts of the district from the list, one at a time. Take them all away, with the box unchecked, to remove the access. People with no precinct can be moved by anyone who organizes.',
         ),
-        chips,
         h(
           'div',
           { class: 'fl-cluster' },
@@ -841,8 +846,7 @@ if (me && !me.isAdmin && !me.organizes) {
             'Volunteers and their people',
             ['Volunteer', 'Open', 'To contact', 'Voicemail', 'Contacted', 'Cured', 'Flagged', 'Last seen', 'Move all open people to'],
             s.volunteers.map((v) => {
-              // Who gets them: type to find a volunteer, or leave the box empty to send them back to the pool. The list opens in the row
-              // (the table scrolls sideways, which would clip a floating one).
+              // Who gets them: type to find a volunteer, or leave the box empty to send them back to the pool. The list floats over the page.
               const to = h('input', {
                 class: 'fl-input',
                 id: `move-${v.id}`,
@@ -852,7 +856,7 @@ if (me && !me.isAdmin && !me.organizes) {
                 'aria-label': `Move everyone ${volunteerName(v)} has open to`,
               });
               let target: number | null = null;
-              const matches = h('ul', {});
+              const matches = floatingList(to);
               window.Frostline.combobox(to, {
                 list: matches,
                 mode: 'suggest',
@@ -901,7 +905,7 @@ if (me && !me.isAdmin && !me.organizes) {
                 String(v.cured),
                 String(v.flagged),
                 dateTime(v.lastSeenAt),
-                h('div', { class: 'fl-stack fl-stack--3' }, h('div', { class: 'fl-cluster' }, to, move), matches),
+                h('span', { class: 'fl-cluster' }, to, move),
               ];
             }),
             [1, 2, 3, 4, 5, 6],
