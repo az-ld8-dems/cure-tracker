@@ -1,0 +1,65 @@
+name: ci
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+concurrency:
+  # A newer push to a pull request cancels the older run.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  checks:
+    # Everything that needs no browser, in one job. Steps after `npm ci` run even when an earlier one failed (`!cancelled()`), so one
+    # run reports every finding. Standard GitHub-hosted runners are free for a public repository, so every job is on `ubuntu-latest`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Types for the Worker, the pages and the tools
+        run: npm run typecheck
+        if: ${{ !cancelled() }}
+      - name: Tests (Access token check, sheet import, wording, API, Lighthouse budget rules)
+        run: npm test
+        if: ${{ !cancelled() }}
+      - name: Biome
+        # Lint and format: default rules, warnings fail the job.
+        run: npm run check
+        if: ${{ !cancelled() }}
+
+  smoke:
+    # The smoke test is a real browser through every flow, with axe in light and dark at phone and desktop width. It runs in
+    # Chromium, Firefox and WebKit (Safari's engine) as parallel jobs, on every pull request, so the wait is one browser's.
+    # Lighthouse runs with Chromium, which it drives.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # GitHub's runners point apt at the Azure mirror, which has been slow for days; the main Ubuntu archive is not.
+      - name: Use archive.ubuntu.com for apt
+        run: |
+          # The runner's sources can point at a list of mirrors (mirror+file:/etc/apt/apt-mirrors.txt) and not name one, so that file is rewritten too.
+          sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/sources.list /etc/apt/sources.list.d/* /etc/apt/apt-mirrors.txt || true
+          # What apt will use now, for the log.
+          grep -rhE '^(URIs|deb)|archive\.ubuntu|azure' /etc/apt/sources.list /etc/apt/sources.list.d /etc/apt/apt-mirrors.txt 2>/dev/null || true
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run smoke
+        env:
+          SMOKE_BROWSER: ${{ matrix.browser }}
+      - name: Lighthouse budgets
+        if: ${{ matrix.browser == 'chromium' && !cancelled() }}
+        run: npm run lighthouse
