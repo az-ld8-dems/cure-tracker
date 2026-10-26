@@ -44,6 +44,6 @@
     "ACCESS_AUD": "709960b7f7885b0efe46716b0681f7b5c8220a08f3cd372a93463a8f2a8193c0",
     // "true" lets admins delete every voter from the admin page (for playing with test data). Set it to "false" and deploy before the real
     // sheet goes in: the route then refuses and the button is gone. D1 Time Travel can undo a reset for 30 days either way (docs/setup.md).
-    "ALLOW_RESET": "true"
+    "ALLOW_RESET": "false"
   }
 }
