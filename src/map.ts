@@ -2,15 +2,7 @@
 // a ZIP, or a match the Census calls non-exact). Pick a pin to see the person and claim them. MapLibre and the PMTiles reader are served from
 // /lib (tools/build.sh), the tiles by the Worker from R2, so the page loads nothing from anywhere else. The map is a canvas, so the list on
 // Find people is the way in for anyone who cannot use it.
-import {
-  addProtocol,
-  type GeoJSONSource,
-  type MapGeoJSONFeature,
-  Map as MapLibreMap,
-  NavigationControl,
-  setWorkerUrl,
-} from '/lib/maplibre-gl.js';
-import { PMTiles, Protocol } from '/lib/pmtiles.js';
+import type { GeoJSONSource, MapGeoJSONFeature, Map as MapLibreMap } from '/lib/maplibre-gl.js';
 import type { MapPins, Person, PersonDetail } from './api.d.ts';
 import {
   $,
@@ -44,7 +36,10 @@ const DISTRICT: [number, number, number, number] = [-112.0129, 33.3765, -111.639
 const EDGE: [number, number, number, number] = [-112.04, 33.35, -111.61, 33.61];
 const TILES_URL = `${location.origin}/tiles/ld8.pmtiles`;
 
-setWorkerUrl('/lib/maplibre-gl-worker.js');
+const idle = (): Promise<void> =>
+  new Promise((resolve) =>
+    typeof requestIdleCallback === 'function' ? requestIdleCallback(() => resolve(), { timeout: 2000 }) : setTimeout(resolve, 200),
+  );
 
 const me = await boot();
 const app = $('#app');
@@ -175,12 +170,17 @@ if (me) {
   }
 
   async function start(tiles: boolean): Promise<void> {
+    // MapLibre is over a megabyte of script, so it is fetched and run only once the page has its content and the browser is idle.
+    await idle();
+    const { addProtocol, Map: MapLibre, NavigationControl, setWorkerUrl } = await import('/lib/maplibre-gl.js');
+    const { PMTiles, Protocol } = await import('/lib/pmtiles.js');
+    setWorkerUrl('/lib/maplibre-gl-worker.js');
     if (tiles) {
       const protocol = new Protocol();
       protocol.add(new PMTiles(TILES_URL));
       addProtocol('pmtiles', protocol.tile);
     }
-    const m = new MapLibreMap({
+    const m = new MapLibre({
       container: frame,
       style: (await styleFor(theme(), tiles)) as never,
       bounds: DISTRICT,
