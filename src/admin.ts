@@ -253,7 +253,7 @@ if (me && !me.isAdmin) {
         tiles(
           [p.added, 'New people'],
           [p.updated, 'Already known'],
-          [p.cured, 'Become cured'],
+          [p.cured, 'Newly cured'],
           [p.stillUncured, 'Unsuccessful cures'],
           [p.reappeared, 'Back after being cured'],
         ),
@@ -416,7 +416,7 @@ if (me && !me.isAdmin) {
         await refresh();
       } catch (e) {
         for (const b of buttons) b.disabled = false;
-        status.textContent = `Stopped after ${sent} addresses: ${failureText(e)} Press the button to go on; the ones already done are not sent again.`;
+        status.textContent = `Stopped after ${sent} addresses: ${failureText(e)} Press the button to continue; the ones already done are not sent again.`;
       }
     }
 
@@ -557,7 +557,7 @@ if (me && !me.isAdmin) {
         h(
           'p',
           { class: 'fl-help' },
-          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. To place one by hand, look the address up on a map and write latitude, then longitude, in the box (a right-click on Google Maps or Apple Maps gives both). Looking them up again also tries the street alone, with no city or ZIP, which finds addresses on a boundary between towns, and believes the answer only if it is within about 15 miles of the middle of their ZIP. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
+          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. To place one by hand, look the address up on a map and write latitude, then longitude, in the box (a right-click on Google Maps or Apple Maps gives both). Looking them up again also tries the street alone, with no city or ZIP, which finds addresses on a boundary between towns, and accepts the answer only if it is within about 15 miles of the middle of their ZIP. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
         ),
         rows,
         h(
