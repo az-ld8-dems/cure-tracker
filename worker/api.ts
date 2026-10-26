@@ -25,7 +25,7 @@ import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { boxOf, pinsIn } from './map.ts';
-import { homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
+import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import {
   finishStage,
   graceCycles,
@@ -133,6 +133,7 @@ interface PersonRow {
   flag: Person['flag'];
   notes_count: number;
   // In a "within N miles" search: the distance in miles, and whether the place is a guess.
+  // The squared distance in miles (nearSql's `away`), when the query was a search by distance.
   away?: number;
   approximate?: number;
 }
@@ -164,7 +165,7 @@ function toPerson(r: PersonRow, today: string): Person {
     assignedTo: r.assigned_to,
     flag: r.flag,
     notesCount: r.notes_count,
-    ...(r.away === undefined ? {} : { distanceMiles: Math.round(r.away * 10) / 10, approximate: r.approximate === 1 }),
+    ...(r.away === undefined ? {} : { distanceMiles: Math.round(awayMiles(r.away) * 10) / 10, approximate: r.approximate === 1 }),
   };
 }
 

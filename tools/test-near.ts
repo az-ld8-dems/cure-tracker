@@ -155,16 +155,19 @@ const everyone = sqlite
     away: miles(home, { lat: Number(r.lat), lon: Number(r.lon) }),
   }));
 // where that is in words: the town and ZIP of the nearest person waiting
+// (The Worker measures on a flat map and this on a sphere, so people within a few hundredths of a mile of the nearest are tied: any of them will do.)
 const nearest = [...everyone].sort((a, b) => a.away - b.away)[0] ?? assert.fail('someone nearby');
-const nearestRow = sqlite.prepare('SELECT city, zip FROM people WHERE id = ?').get(nearest.id);
-const inWords = `${nearestRow?.city} ${nearestRow?.zip}`;
-assert.equal((await meOf(vera)).location?.near, inWords, 'the page can say where you are');
-assert.deepEqual(
-  ((await putPlace(vera, { lat: 33.46, lon: -112.01 })).data as { location: { near: string } }).location.near,
-  inWords,
+const wordsOf = (id: number): string => {
+  const row = sqlite.prepare('SELECT city, zip FROM people WHERE id = ?').get(id);
+  return `${row?.city} ${row?.zip}`;
+};
+const inWords = new Set(everyone.filter((e) => e.away <= nearest.away + 0.02).map((e) => wordsOf(e.id)));
+assert.ok(inWords.has(String((await meOf(vera)).location?.near)), 'the page can say where you are');
+assert.ok(
+  inWords.has(String(((await putPlace(vera, { lat: 33.46, lon: -112.01 })).data as { location: { near: string } }).location.near)),
   'and so does saving it',
 );
-assert.match(inWords, /^[A-Za-z ]+ \d{5}$/);
+assert.match([...inWords][0] ?? '', /^[A-Za-z ]+ \d{5}$/);
 // a place with no one waiting within 25 miles has no words, but is still saved
 const empty = (await putPlace(walt, { lat: 36.5, lon: -112.0 })).data as { location: { lat: number; near: string | null } };
 assert.deepEqual([empty.location.lat, empty.location.near], [36.5, null]);
@@ -185,14 +188,21 @@ for (const [lat, lon] of [
     .map((r) => ({ r, away: miles(got, { lat: Number(r.lat), lon: Number(r.lon) }) }))
     .filter((x) => x.away <= 25)
     .sort((a, b) => a.away - b.away);
-  const want = ranked[0] ? `${ranked[0].r.city} ${ranked[0].r.zip}` : null;
-  assert.equal(got.near, want, `where ${lat}, ${lon} is`);
+  const best = ranked[0];
+  if (best === undefined) assert.equal(got.near, null, `where ${lat}, ${lon} is`);
+  else {
+    const tied = new Set(ranked.filter((x) => x.away <= best.away + 0.02).map((x) => `${x.r.city} ${x.r.zip}`));
+    assert.ok(tied.has(String(got.near)), `where ${lat}, ${lon} is: ${got.near}, wanted one of ${[...tied].join(' / ')}`);
+  }
 }
 
 // a failure of that lookup must not take /api/me down: every page asks it first
 {
   const real = env.DB;
-  env.DB = { ...real, prepare: (sql: string) => (sql.includes('power(sin') ? assert.fail('the database refused it') : real.prepare(sql)) };
+  env.DB = {
+    ...real,
+    prepare: (sql: string) => (sql.includes('SELECT p.city, p.zip') ? assert.fail('the database refused it') : real.prepare(sql)),
+  };
   const me = await call(vera, 'GET', '/api/me');
   env.DB = real;
   assert.equal(me.status, 200, 'still signed in');
@@ -205,10 +215,11 @@ await putPlace(walt, { zip: '85018' });
 for (const radius of [1, 3, 5, 10]) {
   const got = { people: await allOf(vera, `?miles=${radius}&sort=distance`) };
   const gotIds = new Set(got.people.map((p) => p.id));
-  // Anyone inside is in, anyone outside is out: the same sphere, so only rounding in the last decimals can differ.
+  // Anyone inside is in, anyone outside is out. The Worker works on a flat map and this on a sphere, so only people within a few hundredths of a
+  // mile of the edge can differ.
   for (const p of everyone) {
-    if (p.away <= radius - 1e-6) assert.ok(gotIds.has(p.id), `within ${radius} miles but missing: ${p.away.toFixed(3)} away`);
-    if (p.away >= radius + 1e-6) assert.ok(!gotIds.has(p.id), `beyond ${radius} miles but listed: ${p.away.toFixed(3)} away`);
+    if (p.away <= radius - 0.02) assert.ok(gotIds.has(p.id), `within ${radius} miles but missing: ${p.away.toFixed(3)} away`);
+    if (p.away >= radius + 0.02) assert.ok(!gotIds.has(p.id), `beyond ${radius} miles but listed: ${p.away.toFixed(3)} away`);
   }
   const ds = got.people.map((p) => p.distanceMiles ?? -1);
   assert.deepEqual(
@@ -219,7 +230,7 @@ for (const radius of [1, 3, 5, 10]) {
   for (const p of got.people) {
     const truth = everyone.find((e) => e.id === p.id)?.away ?? Number.NaN;
     assert.ok(
-      Math.abs((p.distanceMiles ?? 0) - truth) <= 0.0501,
+      Math.abs((p.distanceMiles ?? 0) - truth) <= 0.06,
       `the distance shown for ${p.id} is ${p.distanceMiles}, really ${truth.toFixed(3)}`,
     );
   }
