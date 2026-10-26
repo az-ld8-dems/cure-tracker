@@ -18,3 +18,4 @@ public/js/
 public/frostline/
 vendor/frostline/components/bundle.js
 .claude/worktrees/
+public/lib/

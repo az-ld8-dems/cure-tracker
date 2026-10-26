@@ -24,6 +24,7 @@ import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
+import { boxOf, pinsIn } from './map.ts';
 import { homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import {
   finishStage,
@@ -51,6 +52,8 @@ export interface ApiContext {
   allowReset: boolean;
   now: () => Date;
   fetcher: typeof fetch;
+  // Whether the map's tile file is in place (worker/tiles.ts). Optional: without it the map has no basemap.
+  tilesReady?: () => Promise<boolean>;
 }
 
 interface Ctx {
@@ -61,6 +64,7 @@ interface Ctx {
   now: string;
   today: string;
   fetcher: typeof fetch;
+  tilesReady: () => Promise<boolean>;
 }
 
 type Body = Record<string, unknown>;
@@ -404,6 +408,14 @@ const toAudit = (r: AuditRow): AuditEntry => ({
   personName: r.person_name,
   detail: parseDetail(r.detail),
 });
+
+// The pins for the map: the open pool inside the box in the query (west, south, east, north), as [id, lat, lon, approximate], and whether the basemap file is there. Everyone sees
+// the pool already, so the map shows nothing the list does not.
+async function mapPins(c: Ctx, _p: string[], _b: Body, url: URL): Promise<Response> {
+  const box = boxOf(url.searchParams);
+  if (!box) throw new HttpError(400, 'Send west, south, east and north: a box in the United States');
+  return json({ ...(await pinsIn(c.db, box)), tiles: await c.tilesReady() });
+}
 
 async function getPerson(c: Ctx, p: string[]): Promise<Response> {
   const id = idOf(p[0]);
@@ -931,6 +943,7 @@ const routes: Route[] = [
   { method: 'PUT', pattern: /^\/api\/me$/, admin: false, handler: putMe },
   { method: 'PUT', pattern: /^\/api\/me\/location$/, admin: false, handler: putLocation },
   { method: 'GET', pattern: /^\/api\/volunteers$/, admin: false, handler: listVolunteers },
+  { method: 'GET', pattern: /^\/api\/map$/, admin: false, handler: mapPins },
   { method: 'GET', pattern: /^\/api\/people$/, admin: false, handler: listPeople },
   { method: 'GET', pattern: /^\/api\/people\/(\d+)$/, admin: false, handler: getPerson },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/claim$/, admin: false, handler: claim },
@@ -1010,6 +1023,7 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
       now: iso,
       today: arizonaDate(now),
       fetcher: api.fetcher,
+      tilesReady: api.tilesReady ?? (async () => false),
     };
     const m = route.pattern.exec(url.pathname);
     return await route.handler(ctx, m?.slice(1) ?? [], body, url);
