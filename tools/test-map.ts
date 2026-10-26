@@ -141,6 +141,57 @@ assert.ok(!after.pins.some((p) => p[0] === claimed.id || p[0] === cured.id), 'ne
 // what is sent is only ids and places: no names, addresses or phones
 assert.doesNotMatch(JSON.stringify(after).replace(/[\d.,[\]{}":\-a-z]/g, ''), /./, 'only numbers and the flags around them');
 
+// --- the filters Find people has narrow the pins the same way
+const idsOf = (m: MapPins): number[] => m.pins.map((p) => p[0]).sort((x, y) => x - y);
+const placedOpen = "assigned_to IS NULL AND status != 'cured' AND lat IS NOT NULL";
+const sqlIds = (where: string, ...binds: string[]): number[] =>
+  sqlite
+    .prepare(`SELECT id FROM people WHERE ${placedOpen} AND ${where} ORDER BY id`)
+    .all(...binds)
+    .map((r) => Number(r.id));
+const common = (column: string): string =>
+  String(
+    sqlite
+      .prepare(
+        `SELECT ${column} AS v FROM people WHERE ${placedOpen} AND ${column} != '' GROUP BY ${column} ORDER BY COUNT(*) DESC LIMIT 1`,
+      )
+      .get()?.v,
+  );
+const aCity = common('city');
+const aParty = common('party');
+const aPrecinct = common('precinct');
+const aLast = String(sqlite.prepare(`SELECT last_name AS v FROM people WHERE ${placedOpen} LIMIT 1`).get()?.v);
+for (const [query, expected] of [
+  [`city=${encodeURIComponent(aCity.toLowerCase())}`, sqlIds('city = ? COLLATE NOCASE', aCity)],
+  [`party=${encodeURIComponent(aParty)}`, sqlIds('party = ?', aParty)],
+  [`precinct=${encodeURIComponent(aPrecinct.toLowerCase())}`, sqlIds('precinct = ? COLLATE NOCASE', aPrecinct)],
+  [`q=${encodeURIComponent(aLast)}`, sqlIds("(first_name || ' ' || last_name || ' ' || address) LIKE ?", `%${aLast}%`)],
+  [`city=${encodeURIComponent(aCity)}&party=${encodeURIComponent(aParty)}`, sqlIds('city = ? COLLATE NOCASE AND party = ?', aCity, aParty)],
+  ['city=nowhere', []],
+] as const) {
+  const got = idsOf(await pins(`${WHOLE}&${query}`));
+  assert.deepEqual(got, expected, `the pins for ${query}`);
+}
+assert.ok(sqlIds('city = ? COLLATE NOCASE', aCity).length < open.length - 2, 'a city filter that leaves some out');
+
+// a radius around the place the volunteer saved: the same people the list finds
+assert.equal((await json('nina@example.com', `/api/map?${WHOLE}&miles=3`)).status, 400, 'a radius needs a saved place');
+assert.equal((await call(vera, 'PUT', '/api/me/location', { lat: 33.45, lon: -112.07 })).status, 200);
+const listed = new Set<number>();
+for (let offset = 0; ; offset += 100) {
+  const page = (await json(vera, `/api/people?miles=3&limit=100&offset=${offset}`)).data as { people: { id: number }[]; hasMore: boolean };
+  for (const p of page.people) listed.add(p.id);
+  if (!page.hasMore) break;
+}
+const nearby = idsOf(await pins(`${WHOLE}&miles=3`));
+assert.deepEqual(
+  nearby,
+  [...listed].filter((id) => sqlIds('id = ?', String(id)).length === 1).sort((x, y) => x - y),
+  'the pins within 3 miles are the placed people the list finds within 3 miles',
+);
+assert.ok(nearby.length > 0 && nearby.length < open.length - 2, 'a radius that leaves some out');
+assert.equal((await json(vera, `/api/map?${WHOLE}&miles=500`)).status, 400, 'a radius that is too big');
+
 // --- a box that is not a box
 for (const query of [
   '',

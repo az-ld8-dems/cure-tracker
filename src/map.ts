@@ -20,6 +20,7 @@ import {
   titleCase,
   toast,
 } from './common.ts';
+import { createFilters } from './filters.ts';
 
 // LD8 as the Census draws it (Arizona State Senate District 8, 2026), and the box the pins are asked for and the map may show: the
 // district with about two miles around it. The tile file is cut to the same box.
@@ -31,6 +32,11 @@ interface FeatureCollection {
     geometry: { type: 'Point'; coordinates: [number, number] };
   }[];
 }
+
+type YouCollection = {
+  type: 'FeatureCollection';
+  features: { type: 'Feature'; properties: Record<string, never>; geometry: { type: 'Point'; coordinates: [number, number] } }[];
+};
 
 const DISTRICT: [number, number, number, number] = [-112.0129, 33.3765, -111.63987, 33.58157];
 const EDGE: [number, number, number, number] = [-112.04, 33.35, -111.61, 33.61];
@@ -57,19 +63,29 @@ if (me) {
   let map: MapLibreMap | null = null;
   let picked: number | null = null;
 
-  const status = h('p', { class: 'fl-help', role: 'status' });
+  const status = h('p', { class: 'fl-help', role: 'status', id: 'map-status' });
   const frame = h('div', { class: 'map-frame', id: 'map', role: 'region', 'aria-label': 'Map of voters who need their ballot cured' });
   const detail = h('div', { class: 'fl-stack fl-stack--3', id: 'picked', tabindex: '-1' });
+  const youLegend = h(
+    'li',
+    { hidden: true },
+    h('span', { class: 'pin pin--you', 'aria-hidden': 'true' }),
+    'You (the place you saved, to about a mile)',
+  );
   const legend = h(
     'ul',
     { class: 'map-legend', 'aria-label': 'Legend' },
     h('li', {}, h('span', { class: 'pin', 'aria-hidden': 'true' }), 'Address found'),
     h('li', {}, h('span', { class: 'pin pin--guess', 'aria-hidden': 'true' }), 'Place is a guess (the middle of a ZIP, or a rough match)'),
+    youLegend,
   );
-  const refresh = h('button', { class: 'fl-btn', type: 'button', onclick: () => void load(true) }, 'Refresh');
+  const refresh = h('button', { class: 'fl-btn', type: 'button', onclick: () => void load() }, 'Refresh');
+  // The filters are the ones Find people has (src/filters.ts), applied to the pins; the place the volunteer saved is drawn in a color of its own.
+  const filters = createFilters({ me, onChange: () => void load() });
 
   clear(
     app,
+    filters.element,
     h('div', { class: 'fl-cluster' }, legend, refresh),
     frame,
     detail,
@@ -142,7 +158,34 @@ if (me) {
       filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'approximate'], 1]],
       paint: { 'circle-color': ring, 'circle-stroke-color': guess, 'circle-stroke-width': 3, 'circle-radius': 7 },
     });
+    addYou(m);
     markPicked(m);
+  }
+
+  // Where the volunteer saved themselves: a dot with a wide, faint halo, in a color no pin has. Drawn above the pins.
+  function addYou(m: MapLibreMap): void {
+    const you = token('--pin-you');
+    m.addSource('you', { type: 'geojson', data: youGeoJson() });
+    m.addLayer({
+      id: 'you-halo',
+      type: 'circle',
+      source: 'you',
+      paint: { 'circle-color': you, 'circle-opacity': 0.25, 'circle-radius': 18 },
+    });
+    m.addLayer({
+      id: 'you',
+      type: 'circle',
+      source: 'you',
+      paint: { 'circle-color': you, 'circle-stroke-color': token('--surface-raised'), 'circle-stroke-width': 3, 'circle-radius': 8 },
+    });
+  }
+
+  function youGeoJson(): YouCollection {
+    const place = filters.place();
+    return {
+      type: 'FeatureCollection',
+      features: place ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [place.lon, place.lat] } }] : [],
+    };
   }
 
   // The picked pin is bigger and has a dark edge, whichever color it is.
@@ -226,6 +269,8 @@ if (me) {
   function show(): void {
     const source = map?.getSource<GeoJSONSource>('pins');
     source?.setData(toGeoJson());
+    map?.getSource<GeoJSONSource>('you')?.setData(youGeoJson());
+    youLegend.hidden = filters.place() === null;
     if (map?.getLayer('guess')) markPicked(map);
   }
 
@@ -240,7 +285,7 @@ if (me) {
       detail.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
     } catch (e) {
       toast(failureText(e), 'error');
-      await load(true);
+      await load();
     }
   }
 
@@ -281,17 +326,33 @@ if (me) {
     } catch (e) {
       toast(failureText(e), 'error');
     }
-    await load(true);
+    await load();
   }
 
   // The whole district at once, not a box per pan: a pan would read the pool again, and the pool is what the day's reads are spent on.
-  async function load(again: boolean): Promise<void> {
+  // The filters narrow it; a slow answer to an older question is dropped.
+  let asked = 0;
+  let begun = false;
+  async function load(): Promise<void> {
+    const mine = ++asked;
+    let got: MapPins;
     try {
       const [west, south, east, north] = EDGE;
-      pins = await api<MapPins>('GET', `/api/map?west=${west}&south=${south}&east=${east}&north=${north}`);
+      const query = new URLSearchParams({ west: String(west), south: String(south), east: String(east), north: String(north) });
+      for (const [name, value] of filters.params()) query.set(name, value);
+      if (!begun) query.set('facets', '1');
+      got = await api<MapPins>('GET', `/api/map?${query}`);
     } catch (e) {
-      clear(status, failureText(e));
+      if (mine === asked) clear(status, failureText(e));
       return;
+    }
+    if (mine !== asked) return;
+    pins = got;
+    // The first answer brings the choices for the filters; the address's filters may turn them into a different question.
+    if (!begun && got.facets) {
+      const before = filters.params().toString();
+      filters.load(got.facets);
+      if (filters.params().toString() !== before) void load();
     }
     const n = pins.pins.length;
     const guesses = pins.pins.filter((p) => p[3] === 1).length;
@@ -301,8 +362,9 @@ if (me) {
         ? `Showing the first ${n.toLocaleString()} people. Find people has the rest.`
         : `${n.toLocaleString()} ${n === 1 ? 'person' : 'people'} on the map, ${guesses.toLocaleString()} of them at a guessed place. People without a place are not here; Find people lists them.`,
     );
-    if (again) show();
+    if (begun) show();
     else {
+      begun = true;
       try {
         await start(pins.tiles);
       } catch (e) {
@@ -321,5 +383,5 @@ if (me) {
     }
   }
 
-  await load(false);
+  await load();
 }

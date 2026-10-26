@@ -279,4 +279,6 @@ export interface MapPins {
   pins: [number, number, number, 0 | 1][];
   more: boolean;
   tiles: boolean;
+  // With facets=1 (the first request): the values the filters offer, as on the list.
+  facets?: NonNullable<PeoplePage['facets']>;
 }

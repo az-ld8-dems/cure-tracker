@@ -274,9 +274,41 @@ try {
     expect('map', /guess/.test((await page.getByRole('list', { name: 'Legend' }).textContent()) ?? ''), 'the legend lacks the guessed pin');
     expect(
       'map',
-      /street map has not been set up/.test((await page.getByRole('status').textContent()) ?? ''),
+      /street map has not been set up/.test((await page.locator('#map-status').textContent()) ?? ''),
       'no notice that tiles are missing',
     );
+    // The filters are the list's: they narrow the pins, stay in the address, and go with the link to the other page.
+    const pinCount = async (): Promise<number> =>
+      Number(
+        /([\d,]+) (?:people|person) on the map/.exec((await page.locator('#map-status').textContent()) ?? '')?.[1]?.replaceAll(',', ''),
+      );
+    const all = await pinCount();
+    // (A phone keeps the filters and the Near me box closed; where there is room they are open.)
+    if (!(await page.getByLabel('City').isVisible())) await page.getByText('Filter and sort').click();
+    await page.getByLabel('City').selectOption('Tempe');
+    await page.waitForFunction((was) => {
+      const m = /([\d,]+) (?:people|person) on the map/.exec(document.querySelector('#map-status')?.textContent ?? '');
+      return m?.[1] !== undefined && Number(m[1].replaceAll(',', '')) !== was;
+    }, all);
+    const tempe = await pinCount();
+    expect('map', tempe > 0 && tempe < all, `${tempe} pins in Tempe of ${all}`);
+    expect('map', /[?&]city=/.test(page.url()), 'the filter is not in the address');
+    expect(
+      'map',
+      /city=/.test(
+        (await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Find people' }).getAttribute('href')) ?? '',
+      ),
+      'the link to Find people does not carry the filter',
+    );
+    // The place the volunteer saved gets a pin of its own, and a line in the legend.
+    expect('map', !(await page.locator('.pin--you').isVisible()), 'a place is shown that was never saved');
+    if (!(await page.getByLabel('or the middle of a ZIP').isVisible())) await page.getByText('Near me', { exact: true }).click();
+    await page.getByLabel('or the middle of a ZIP').fill('85281');
+    await page.getByRole('button', { name: 'Use this ZIP' }).click();
+    await page.locator('.pin--you').waitFor();
+    await page.getByRole('button', { name: 'Forget where I am' }).click();
+    await page.locator('.pin--you').waitFor({ state: 'hidden' });
+    await page.getByLabel('City').selectOption('');
   }
   await check(page, 'map');
 
