@@ -166,7 +166,7 @@ if (me) {
       filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'who'], 0], ['==', ['get', 'approximate'], 1]],
       paint: { 'circle-color': ring, 'circle-stroke-color': guess, 'circle-stroke-width': 3, 'circle-radius': 7 },
     });
-    // A volunteer has them: grey with a dark edge, red when nothing has happened for days.
+    // A volunteer has them: yellow with a dark edge, red when nothing has happened for days.
     m.addLayer({
       id: 'claimed',
       type: 'circle',
