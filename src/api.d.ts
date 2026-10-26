@@ -12,6 +12,9 @@ export interface Me {
   // Empty until the volunteer has said what to call them.
   name: string;
   isAdmin: boolean;
+  // The precincts the volunteer may organize (move people between volunteers in): all of them for a site admin, null for a plain volunteer.
+  // A scope with `all` includes people whose sheet row has no precinct.
+  organizes: { all: boolean; precincts: string[] } | null;
   // The place the volunteer saved for "near me", rounded to about a mile; only they ever see it. null until they save one.
   // `near` says where that is in words (the town and ZIP of the nearest person waiting), when anyone is within 25 miles.
   location: { lat: number; lon: number; near: string | null } | null;
@@ -281,4 +284,17 @@ export interface MapPins {
   tiles: boolean;
   // With facets=1 (the first request): the values the filters offer, as on the list.
   facets?: NonNullable<PeoplePage['facets']>;
+}
+
+// What a volunteer organizes: every precinct (all), or the listed ones.
+export interface OrganizerGrant {
+  volunteerId: number;
+  all: boolean;
+  precincts: string[];
+}
+
+// Everyone's grants, and the precincts the open people are in (a grant outside them no longer matches anyone).
+export interface OrganizerList {
+  grants: OrganizerGrant[];
+  precincts: string[];
 }

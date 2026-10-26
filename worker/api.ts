@@ -11,6 +11,8 @@ import type {
   Me,
   MergePair,
   Note,
+  OrganizerGrant,
+  OrganizerList,
   PeoplePage,
   Person,
   PersonDetail,
@@ -26,6 +28,7 @@ import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { boxOf, pinsIn } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
+import { allGrants, type Grant, inScope, parseGrant, replaceGrant, type Scope, scopeOf, scopeWhere } from './organizers.ts';
 import {
   finishStage,
   graceCycles,
@@ -60,6 +63,8 @@ interface Ctx {
   db: Db;
   me: Volunteer;
   isAdmin: boolean;
+  // What the caller may organize (move people between volunteers in): everything for a site admin, some precincts for an organizer, null for a plain volunteer.
+  scope: Scope | null;
   allowReset: boolean;
   now: string;
   today: string;
@@ -194,6 +199,11 @@ function mayChange(c: Ctx, p: PersonRow): void {
   if (!c.isAdmin && p.assigned_to !== c.me.id) throw new HttpError(403, 'This person is not assigned to you');
 }
 
+// Whoever organizes the person's precinct (a site admin organizes all of them).
+function mayOrganize(c: Ctx, p: PersonRow): void {
+  if (c.scope === null || !inScope(c.scope, p.precinct)) throw new HttpError(403, 'This person is in a precinct you do not organize');
+}
+
 // ---- routes: everyone signed in
 
 // Where the volunteer saved themselves, with where that is in words.
@@ -216,7 +226,7 @@ async function getMe(c: Ctx): Promise<Response> {
     // Being seen is not worth a page that does not load.
     console.warn('could not record last_seen_at', e);
   }
-  const me: Me = { ...c.me, isAdmin: c.isAdmin, location: await myLocation(c) };
+  const me: Me = { ...c.me, isAdmin: c.isAdmin, organizes: c.scope, location: await myLocation(c) };
   return json(me);
 }
 
@@ -226,7 +236,7 @@ async function putMe(c: Ctx, _p: string[], body: Body): Promise<Response> {
     c.db.prepare('UPDATE volunteers SET name = ? WHERE id = ?').bind(name, c.me.id),
     auditStmt(c, 'volunteer.rename', null, { from: c.me.name, to: name }),
   ]);
-  const me: Me = { ...c.me, name, isAdmin: c.isAdmin, location: await myLocation(c) };
+  const me: Me = { ...c.me, name, isAdmin: c.isAdmin, organizes: c.scope, location: await myLocation(c) };
   return json(me);
 }
 
@@ -354,7 +364,7 @@ function narrowBy(url: URL, withPhone: boolean): { where: string[]; binds: Value
 async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Promise<Response> {
   const scope = url.searchParams.get('scope') ?? 'pool';
   if (scope !== 'pool' && scope !== 'mine' && scope !== 'all') throw new HttpError(400, 'scope must be pool, mine or all');
-  if (scope === 'all' && !c.isAdmin) throw new HttpError(403, 'Forbidden');
+  if (scope === 'all' && c.scope === null) throw new HttpError(403, 'Forbidden');
   // "Within N miles" of the place the volunteer saved: only for the pool, and only with a saved place. Sorting by distance needs it too,
   // because a sort over everyone would read the whole pool.
   if ((url.searchParams.get('miles') ?? '') !== '' && scope !== 'pool') throw new HttpError(400, 'miles only applies to the pool');
@@ -376,8 +386,13 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
     where.push('p.assigned_to = ?');
     binds.push(c.me.id);
   }
+  if (scope === 'all' && c.scope !== null && !c.scope.all) {
+    const only = scopeWhere(c.scope, 'p.precinct');
+    where.push(only.sql);
+    binds.push(...only.binds);
+  }
   if (near) where.push(near.where);
-  const narrowed = narrowBy(url, c.isAdmin);
+  const narrowed = narrowBy(url, c.scope !== null);
   where.push(...narrowed.where);
   binds.push(...narrowed.binds);
 
@@ -547,6 +562,9 @@ async function addNote(c: Ctx, p: string[], body: Body): Promise<Response> {
 // ---- routes: admins
 
 async function adminStats(c: Ctx): Promise<Response> {
+  // An organizer sees the numbers for their own precincts, and nothing about uploads or the geocoder.
+  const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'precinct');
+  const onlyP = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'p.precinct');
   const totals = await c.db
     .prepare(
       `SELECT COALESCE(SUM(status = 'needs_contact'), 0) AS needs, COALESCE(SUM(status = 'left_voicemail'), 0) AS voicemail,
@@ -558,8 +576,9 @@ async function adminStats(c: Ctx): Promise<Response> {
          COALESCE(SUM(status != 'cured' AND approximate = 1), 0) AS roughly,
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie') AND lat IS NULL), 0) AS nowhere,
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated
-       FROM people`,
+       FROM people WHERE ${only.sql}`,
     )
+    .bind(...only.binds)
     .first<{
       needs: number;
       voicemail: number;
@@ -574,7 +593,7 @@ async function adminStats(c: Ctx): Promise<Response> {
       nowhere: number;
       unlocated: number;
     }>();
-  const sample = (await waitingForGeocode(c.db, 0, 3)).map(censusLine);
+  const sample = c.isAdmin ? (await waitingForGeocode(c.db, 0, 3)).map(censusLine) : [];
   const volunteers = await c.db
     .prepare(
       `SELECT v.id, v.email, v.name, v.last_seen_at,
@@ -584,9 +603,10 @@ async function adminStats(c: Ctx): Promise<Response> {
          COALESCE(SUM(p.status = 'contacted'), 0) AS contacted,
          COALESCE(SUM(p.status = 'cured'), 0) AS cured,
          COALESCE(SUM(p.status != 'cured' AND p.flag IS NOT NULL), 0) AS flagged
-       FROM volunteers v LEFT JOIN people p ON p.assigned_to = v.id
+       FROM volunteers v LEFT JOIN people p ON p.assigned_to = v.id AND ${onlyP.sql}
        GROUP BY v.id ORDER BY v.name COLLATE NOCASE, v.email`,
     )
+    .bind(...onlyP.binds)
     .all<{
       id: number;
       email: string;
@@ -600,13 +620,16 @@ async function adminStats(c: Ctx): Promise<Response> {
       flagged: number;
     }>();
   const flagged = await c.db
-    .prepare(`${PERSON_SELECT} WHERE p.flag IS NOT NULL AND p.status != 'cured' ORDER BY p.status_changed_at DESC, p.id`)
+    .prepare(`${PERSON_SELECT} WHERE p.flag IS NOT NULL AND p.status != 'cured' AND ${onlyP.sql} ORDER BY p.status_changed_at DESC, p.id`)
+    .bind(...onlyP.binds)
     .all<PersonRow>();
-  const last = await c.db
-    .prepare(
-      'SELECT id, uploaded_by, filename, created_at, rows, added, cured, still_uncured, reappeared FROM uploads ORDER BY id DESC LIMIT 1',
-    )
-    .first<Parameters<typeof uploadRecord>[0]>();
+  const last = c.isAdmin
+    ? await c.db
+        .prepare(
+          'SELECT id, uploaded_by, filename, created_at, rows, added, cured, still_uncured, reappeared FROM uploads ORDER BY id DESC LIMIT 1',
+        )
+        .first<Parameters<typeof uploadRecord>[0]>()
+    : null;
   const stats: AdminStats = {
     totals: {
       needsContact: totals?.needs ?? 0,
@@ -874,6 +897,7 @@ async function assign(c: Ctx, p: string[], body: Body): Promise<Response> {
   if (to !== null && (typeof to !== 'number' || !Number.isSafeInteger(to)))
     throw new HttpError(400, 'volunteerId must be a volunteer id or null');
   const row = await personRow(c, id);
+  mayOrganize(c, row);
   if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
   if (to !== null) await volunteerById(c, to);
   await c.db.batch([
@@ -886,6 +910,7 @@ async function assign(c: Ctx, p: string[], body: Body): Promise<Response> {
 async function dismissFlag(c: Ctx, p: string[]): Promise<Response> {
   const id = idOf(p[0]);
   const row = await personRow(c, id);
+  mayOrganize(c, row);
   if (row.flag === null) return json(toPerson(row, c.today));
   await c.db.batch([
     c.db.prepare('UPDATE people SET flag = NULL, updated_at = ? WHERE id = ?').bind(c.now, id),
@@ -903,12 +928,52 @@ async function reassignAll(c: Ctx, p: string[], body: Body): Promise<Response> {
   if (to === from) throw new HttpError(400, 'Pick someone else');
   await volunteerById(c, from);
   if (to !== null) await volunteerById(c, to);
+  // An organizer moves only the people of their own precincts.
+  const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'precinct');
   const res = await c.db
-    .prepare("UPDATE people SET assigned_to = ?, updated_at = ? WHERE assigned_to = ? AND status != 'cured'")
-    .bind(to, c.now, from)
+    .prepare(`UPDATE people SET assigned_to = ?, updated_at = ? WHERE assigned_to = ? AND status != 'cured' AND ${only.sql}`)
+    .bind(to, c.now, from, ...only.binds)
     .run();
-  await auditStmt(c, 'reassign', null, { from, to, count: res.meta.changes }).run();
+  await auditStmt(c, 'reassign', null, {
+    from,
+    to,
+    count: res.meta.changes,
+    ...(c.scope?.all === false && { precincts: c.scope.precincts }),
+  }).run();
   return json({ moved: res.meta.changes });
+}
+
+// Who organizes what, for the admin page: every volunteer's grant, and the precincts the open people are in (to spot a grant that no longer matches).
+async function listOrganizers(c: Ctx): Promise<Response> {
+  const grants = await allGrants(c.db);
+  const { results } = await c.db
+    .prepare("SELECT DISTINCT precinct FROM people WHERE status != 'cured' AND precinct != '' ORDER BY precinct COLLATE NOCASE")
+    .all<{ precinct: string }>();
+  const list: OrganizerList = { grants, precincts: results.map((r) => r.precinct) };
+  return json(list);
+}
+
+// Replaces what a volunteer organizes: all precincts, some, or none (an empty list, which makes them a plain volunteer again).
+async function setOrganizer(c: Ctx, p: string[], body: Body): Promise<Response> {
+  const id = idOf(p[0]);
+  const target = await volunteerById(c, id);
+  let grant: Grant;
+  try {
+    grant = parseGrant(body);
+  } catch (e) {
+    throw new HttpError(400, e instanceof Error ? e.message : 'not a valid grant');
+  }
+  const before = (await allGrants(c.db)).find((g) => g.volunteerId === id) ?? { all: false, precincts: [] };
+  await c.db.batch([
+    ...replaceGrant(c.db, id, grant, c.me.email, c.now),
+    auditStmt(c, 'organizer.set', null, {
+      volunteer: target.id,
+      from: { all: before.all, precincts: before.precincts },
+      to: grant,
+    }),
+  ]);
+  const row: OrganizerGrant = { volunteerId: id, ...grant };
+  return json(row);
 }
 
 async function getSettings(c: Ctx): Promise<Response> {
@@ -959,40 +1024,43 @@ async function reset(c: Ctx, _p: string[], body: Body): Promise<Response> {
 interface Route {
   method: 'GET' | 'POST' | 'PUT';
   pattern: RegExp;
-  admin: boolean;
+  // Who may call it: anyone signed in, anyone who organizes some precincts (and site admins), or site admins only.
+  level: 'volunteer' | 'organizer' | 'admin';
   handler: (c: Ctx, params: string[], body: Body, url: URL) => Promise<Response>;
 }
 
 const routes: Route[] = [
-  { method: 'GET', pattern: /^\/api\/me$/, admin: false, handler: getMe },
-  { method: 'PUT', pattern: /^\/api\/me$/, admin: false, handler: putMe },
-  { method: 'PUT', pattern: /^\/api\/me\/location$/, admin: false, handler: putLocation },
-  { method: 'GET', pattern: /^\/api\/volunteers$/, admin: false, handler: listVolunteers },
-  { method: 'GET', pattern: /^\/api\/map$/, admin: false, handler: mapPins },
-  { method: 'GET', pattern: /^\/api\/people$/, admin: false, handler: listPeople },
-  { method: 'GET', pattern: /^\/api\/people\/(\d+)$/, admin: false, handler: getPerson },
-  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/claim$/, admin: false, handler: claim },
-  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/release$/, admin: false, handler: release },
-  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/status$/, admin: false, handler: setStatus },
-  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/notes$/, admin: false, handler: addNote },
-  { method: 'GET', pattern: /^\/api\/admin\/stats$/, admin: true, handler: adminStats },
-  { method: 'GET', pattern: /^\/api\/admin\/audit$/, admin: true, handler: adminAudit },
-  { method: 'GET', pattern: /^\/api\/admin\/uploads$/, admin: true, handler: adminUploads },
-  { method: 'GET', pattern: /^\/api\/admin\/settings$/, admin: true, handler: getSettings },
-  { method: 'PUT', pattern: /^\/api\/admin\/settings$/, admin: true, handler: putSettings },
-  { method: 'POST', pattern: /^\/api\/admin\/reset$/, admin: true, handler: reset },
-  { method: 'POST', pattern: /^\/api\/admin\/geocode$/, admin: true, handler: geocode },
-  { method: 'GET', pattern: /^\/api\/admin\/geocode\/unplaced$/, admin: true, handler: unplaced },
-  { method: 'GET', pattern: /^\/api\/admin\/uploads\/columns$/, admin: true, handler: uploadColumns },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage$/, admin: true, handler: uploadStage },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/rows$/, admin: true, handler: uploadRows },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/merges$/, admin: true, handler: uploadMerges },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/plan$/, admin: true, handler: uploadPlan },
-  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/finish$/, admin: true, handler: uploadFinish },
-  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, admin: true, handler: assign },
-  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/place$/, admin: true, handler: placePerson },
-  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/dismiss-flag$/, admin: true, handler: dismissFlag },
-  { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/reassign$/, admin: true, handler: reassignAll },
+  { method: 'GET', pattern: /^\/api\/me$/, level: 'volunteer', handler: getMe },
+  { method: 'PUT', pattern: /^\/api\/me$/, level: 'volunteer', handler: putMe },
+  { method: 'PUT', pattern: /^\/api\/me\/location$/, level: 'volunteer', handler: putLocation },
+  { method: 'GET', pattern: /^\/api\/volunteers$/, level: 'volunteer', handler: listVolunteers },
+  { method: 'GET', pattern: /^\/api\/map$/, level: 'volunteer', handler: mapPins },
+  { method: 'GET', pattern: /^\/api\/people$/, level: 'volunteer', handler: listPeople },
+  { method: 'GET', pattern: /^\/api\/people\/(\d+)$/, level: 'volunteer', handler: getPerson },
+  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/claim$/, level: 'volunteer', handler: claim },
+  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/release$/, level: 'volunteer', handler: release },
+  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/status$/, level: 'volunteer', handler: setStatus },
+  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/notes$/, level: 'volunteer', handler: addNote },
+  { method: 'GET', pattern: /^\/api\/admin\/stats$/, level: 'organizer', handler: adminStats },
+  { method: 'GET', pattern: /^\/api\/admin\/audit$/, level: 'admin', handler: adminAudit },
+  { method: 'GET', pattern: /^\/api\/admin\/uploads$/, level: 'admin', handler: adminUploads },
+  { method: 'GET', pattern: /^\/api\/admin\/organizers$/, level: 'admin', handler: listOrganizers },
+  { method: 'PUT', pattern: /^\/api\/admin\/volunteers\/(\d+)\/organizer$/, level: 'admin', handler: setOrganizer },
+  { method: 'GET', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: getSettings },
+  { method: 'PUT', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: putSettings },
+  { method: 'POST', pattern: /^\/api\/admin\/reset$/, level: 'admin', handler: reset },
+  { method: 'POST', pattern: /^\/api\/admin\/geocode$/, level: 'admin', handler: geocode },
+  { method: 'GET', pattern: /^\/api\/admin\/geocode\/unplaced$/, level: 'admin', handler: unplaced },
+  { method: 'GET', pattern: /^\/api\/admin\/uploads\/columns$/, level: 'admin', handler: uploadColumns },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage$/, level: 'admin', handler: uploadStage },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/rows$/, level: 'admin', handler: uploadRows },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/merges$/, level: 'admin', handler: uploadMerges },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/plan$/, level: 'admin', handler: uploadPlan },
+  { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/finish$/, level: 'admin', handler: uploadFinish },
+  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, level: 'organizer', handler: assign },
+  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/place$/, level: 'admin', handler: placePerson },
+  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/dismiss-flag$/, level: 'organizer', handler: dismissFlag },
+  { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/reassign$/, level: 'organizer', handler: reassignAll },
 ];
 
 async function ensureVolunteer(db: Db, email: string, now: string): Promise<Volunteer> {
@@ -1019,7 +1087,7 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
     if (matching.length === 0) throw new HttpError(404, 'Not found');
     const route = matching.find((r) => r.method === request.method);
     if (!route) throw new HttpError(405, 'Method not allowed');
-    if (route.admin && !api.isAdmin) throw new HttpError(403, 'Forbidden');
+    if (route.level === 'admin' && !api.isAdmin) throw new HttpError(403, 'Forbidden');
 
     let body: Body = {};
     if (request.method !== 'GET') {
@@ -1040,10 +1108,13 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
     const now = api.now();
     const iso = now.toISOString();
     const me = await ensureVolunteer(api.db, api.email, iso);
+    const scope = await scopeOf(api.db, me.id, api.isAdmin);
+    if (route.level === 'organizer' && scope === null) throw new HttpError(403, 'Forbidden');
     const ctx: Ctx = {
       db: api.db,
       me,
       isAdmin: api.isAdmin,
+      scope,
       allowReset: api.allowReset,
       now: iso,
       today: arizonaDate(now),

@@ -208,7 +208,7 @@ export async function boot(): Promise<Me | null> {
     if (app) clear(app, banner('warn', h('p', {}, failureText(e))));
     return null;
   }
-  $('#nav-admin').hidden = !me.isAdmin;
+  $('#nav-admin').hidden = !me.isAdmin && !me.organizes;
   $('#who').textContent = me.name || me.email;
   wireAccountMenu();
   if (me.name !== '') return me;

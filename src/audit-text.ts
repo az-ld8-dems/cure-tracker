@@ -12,6 +12,13 @@ const status = (v: unknown): string => (typeof v === 'string' ? (STATUS_WORDS[v]
 const count = (n: unknown, one: string, many = `${one}s`): string => `${String(n)} ${n === 1 ? one : many}`;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+const grantWords = (g: unknown): string => {
+  if (!isRecord(g)) return '?';
+  if (g.all === true) return 'all precincts';
+  const list = Array.isArray(g.precincts) ? g.precincts.map(String) : [];
+  return list.length === 0 ? 'nothing' : `precincts ${list.join(', ')}`;
+};
+
 // `who` names a volunteer by id; null (or an id nobody has) is the pool.
 export function describeAudit(e: AuditEntry, who: (id: number | null) => string): string {
   const d = e.detail;
@@ -29,6 +36,8 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
       return `moved from ${volunteer(d.from)} to ${volunteer(d.to)}`;
     case 'reassign':
       return `moved ${count(d.count, 'person', 'people')} from ${volunteer(d.from)} to ${volunteer(d.to)}`;
+    case 'organizer.set':
+      return `changed what ${volunteer(d.volunteer)} organizes: ${grantWords(d.to)} (was ${grantWords(d.from)})`;
     case 'flag.dismiss':
       return 'dismissed the flag';
     case 'person.place':

@@ -5,6 +5,7 @@ import type { AccessVerifier } from './access.ts';
 import { type AccessEnv, requireAccess } from './access-gate.ts';
 import { handleApi } from './api.ts';
 import type { Db } from './db.ts';
+import { organizesAnything } from './organizers.ts';
 import { serveTiles, TILES_PATH, type TileBucket, tilesReady } from './tiles.ts';
 
 export interface AppEnv extends AccessEnv {
@@ -54,6 +55,8 @@ export async function handle(request: Request, env: AppEnv, deps: Deps = {}): Pr
     });
   }
   if (path === TILES_PATH) return serveTiles(request, env.TILES);
-  if ((path === '/admin' || path.startsWith('/admin/')) && !isAdmin) return text(403, 'Forbidden');
+  // The admin pages are for site admins and for volunteers who organize some precincts (the API checks what each may do).
+  if ((path === '/admin' || path.startsWith('/admin/')) && !isAdmin && !(await organizesAnything(env.DB, email)))
+    return text(403, 'Forbidden');
   return env.ASSETS.fetch(request);
 }
