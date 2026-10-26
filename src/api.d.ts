@@ -272,3 +272,11 @@ export interface ApiError {
   error: string;
   problems?: string[];
 }
+
+// GET /api/map: the open pool inside a box, as [id, latitude, longitude, 1 when the place is a guess]; `more` when the box held more than
+// the Worker will send, and `tiles` when the basemap file is in place.
+export interface MapPins {
+  pins: [number, number, number, 0 | 1][];
+  more: boolean;
+  tiles: boolean;
+}

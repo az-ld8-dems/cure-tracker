@@ -7,13 +7,14 @@
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { type Browser, type BrowserContext, chromium, firefox, type Page, webkit } from 'playwright';
+import { chromiumQuirks } from './lib/chromium-quirks.ts';
 import { DEV_ADMIN, startDevServer } from './lib/dev-server.ts';
 import { sheetCsv, syntheticPeople } from './lib/sheet.ts';
 import { webkitQuirks } from './lib/webkit-quirks.ts';
 
 // Every page links the vendored Frostline's versioned folder: the version in the HTML must be the one that is built.
 const frostline = readFileSync(new URL('../vendor/frostline/VERSION', import.meta.url), 'utf8').trim();
-for (const file of ['index.html', 'pool/index.html', 'admin/index.html', '404.html']) {
+for (const file of ['index.html', 'pool/index.html', 'map/index.html', 'admin/index.html', '404.html']) {
   const html = readFileSync(new URL(`../public/${file}`, import.meta.url), 'utf8');
   const linked = new Set([...html.matchAll(/\/frostline\/([\d.]+)\//g)].map((m) => m[1]));
   if (linked.size !== 1 || !linked.has(frostline)) {
@@ -34,8 +35,8 @@ const PEOPLE = 40;
 const { server, port, sqlite } = await startDevServer({ people: PEOPLE });
 const base = `http://localhost:${port}`;
 const problems: string[] = [];
-// Known WebKit-only console messages that were ignored, by label (tools/lib/webkit-quirks.ts); listed at the end.
-const quirks = name === 'webkit' ? webkitQuirks : [];
+// Known browser-specific console messages that were ignored, by label (tools/lib/webkit-quirks.ts, chromium-quirks.ts); listed at the end.
+const quirks = name === 'webkit' ? webkitQuirks : name === 'chromium' ? chromiumQuirks : [];
 const ignored = new Map<string, number>();
 const problem = (where: string, what: string) => problems.push(`${where}: ${what}`);
 
@@ -228,6 +229,24 @@ try {
   await page.getByRole('button', { name: 'Person' }).click();
   await page.locator('th[aria-sort="descending"]').waitFor();
   await check(page, 'find people (table)');
+
+  // ---- the map: the dev server has no tile file, so the pins are drawn on a plain background and the page says so
+  await page.getByRole('link', { name: 'Map', exact: true }).click();
+  await page.getByText(/people? on the map/).waitFor();
+  await page.locator('#map canvas').waitFor();
+  expect('map', await page.getByRole('list', { name: 'Legend' }).isVisible(), 'the legend is not shown');
+  expect(
+    'map',
+    /Address found/.test((await page.getByRole('list', { name: 'Legend' }).textContent()) ?? ''),
+    'the legend lacks the exact pin',
+  );
+  expect('map', /guess/.test((await page.getByRole('list', { name: 'Legend' }).textContent()) ?? ''), 'the legend lacks the guessed pin');
+  expect(
+    'map',
+    /street map has not been set up/.test((await page.getByRole('status').textContent()) ?? ''),
+    'no notice that tiles are missing',
+  );
+  await check(page, 'map');
 
   // the admin pages are closed to a volunteer (this page's own 403 is the point)
   const denied = await (await ctx.newPage()).goto(`${base}/admin/`);
@@ -434,6 +453,10 @@ try {
     .click();
   await doraPage.getByText(/is on your list now/).waitFor();
   await check(doraPage, 'find people (dark)');
+  await doraPage.goto(`${base}/map/`);
+  await doraPage.getByText(/people? on the map/).waitFor();
+  await doraPage.locator('#map canvas').waitFor();
+  await check(doraPage, 'map (dark)');
   await doraPage.goto(`${base}/`);
   await doraPage.locator('.people > li').first().waitFor();
   await check(doraPage, 'my people (dark)');
@@ -481,7 +504,7 @@ try {
   server.close();
 }
 
-for (const [label, n] of ignored) console.log(`ignored ${n}x (WebKit quirk): ${label}`);
+for (const [label, n] of ignored) console.log(`ignored ${n}x (browser quirk): ${label}`);
 if (problems.length) {
   console.log(`PROBLEMS:\n${[...new Set(problems)].join('\n')}`);
   process.exit(1);

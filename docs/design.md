@@ -25,6 +25,7 @@ The LD8 doc is the **Arizona LD8 Democrats design system** (Claude artifact `VmU
 | Small and secondary buttons | Frostline `fl-btn`, `fl-btn--sm` | |
 | Page frame, stacks, grids, skip link | Frostline `fl-page`, `fl-stack`, `fl-grid`, `fl-cluster`, `fl-skip` | |
 | The definition list of facts about a person, the note list | ours (neither system has one) | `.facts`, `.notes` in `app.css` |
+| The map's legend and its two pin looks (a solid dot, a ring), the map frame | ours (neither system has one); the pins' colors are the tokens `--pin-exact` and `--pin-guess`, aliases of the brand blue and the copper | `.map-legend`, `.pin`, `.map-frame` in `app.css`; `src/map.ts` reads the tokens |
 
 ## Tokens: how two systems share one set
 

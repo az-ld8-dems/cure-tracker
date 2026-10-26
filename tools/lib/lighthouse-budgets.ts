@@ -16,6 +16,13 @@ export const budgets = {
   } as Record<string, number>,
 };
 
+// A page may have looser limits for the two things its purpose costs, with the reason at the call (the map page loads MapLibre). Only the
+// performance score and the timing metrics can be loosened: accessibility, best practices and SEO are 100 everywhere.
+export interface Loosened {
+  performance?: number;
+  metrics?: Record<string, number>;
+}
+
 // The part of a Lighthouse result this reads, so a test can hand in a small made-up one. The real result is assignable to it.
 export interface LhrLike {
   categories: Record<string, { score: number | null; auditRefs?: { id: string; weight: number }[] } | undefined>;
@@ -65,11 +72,12 @@ export interface Verdict {
   timing: boolean;
 }
 
-export function judge(tag: string, m: Measurement): Verdict {
+export function judge(tag: string, m: Measurement, loosened: Loosened = {}): Verdict {
   const parts: string[] = [];
   const problems: string[] = [];
   let timing = false;
-  for (const [cat, min] of Object.entries(budgets.categories)) {
+  for (const [cat, strict] of Object.entries(budgets.categories)) {
+    const min = cat === 'performance' ? Math.min(strict, loosened.performance ?? strict) : strict;
     const score = m.scores[cat];
     if (score === undefined) {
       problems.push(`${tag}: ${cat} has no score`);
@@ -82,7 +90,8 @@ export function judge(tag: string, m: Measurement): Verdict {
       if (cat === 'performance') timing = true;
     }
   }
-  for (const [id, max] of Object.entries(budgets.metrics)) {
+  for (const [id, strict] of Object.entries(budgets.metrics)) {
+    const max = Math.max(strict, loosened.metrics?.[id] ?? strict);
     const v = m.metrics[id];
     if (v === undefined) {
       problems.push(`${tag}: ${id} has no value`);
@@ -131,7 +140,7 @@ export const RETRIES = 2;
 // Measures one page: one Lighthouse run, and only if that run misses a timing budget, RETRIES more and the median of all. A
 // page that is really over budget misses in the median too; a single slow run on a busy machine does not fail the build. Misses
 // of the categories that do not depend on timing (accessibility, best practices, SEO) are reported straight away, with no rerun.
-export async function measurePage(tag: string, run: () => Promise<LhrLike | null>): Promise<PageResult> {
+export async function measurePage(tag: string, run: () => Promise<LhrLike | null>, loosened: Loosened = {}): Promise<PageResult> {
   const lhrs: LhrLike[] = [];
   const once = async (): Promise<{ m: Measurement } | { problem: string }> => {
     const lhr = await run();
@@ -142,7 +151,7 @@ export async function measurePage(tag: string, run: () => Promise<LhrLike | null
   };
   const first = await once();
   if ('problem' in first) return { line: '', problems: [first.problem], runs: lhrs.length, lhrs };
-  const verdict = judge(tag, first.m);
+  const verdict = judge(tag, first.m, loosened);
   if (!verdict.timing) return { line: verdict.line, problems: verdict.problems, runs: 1, lhrs };
 
   const measurements = [first.m];
@@ -157,7 +166,7 @@ export async function measurePage(tag: string, run: () => Promise<LhrLike | null
       };
     measurements.push(next.m);
   }
-  const final = judge(tag, medianOf(measurements));
+  const final = judge(tag, medianOf(measurements), loosened);
   const perfs = measurements.map((m) => Math.round((m.scores.performance ?? 0) * 100)).join(', ');
   return {
     line: `${final.line} [median of ${measurements.length} after a miss; performance ${perfs}]`,

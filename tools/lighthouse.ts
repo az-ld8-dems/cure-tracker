@@ -14,14 +14,19 @@ import lighthouse from 'lighthouse';
 import desktopConfig from 'lighthouse/core/config/desktop-config.js';
 import { chromium } from 'playwright';
 import { DEV_ADMIN, DEV_VOLUNTEER, startDevServer } from './lib/dev-server.ts';
-import { budgets, type LhrLike, measurePage } from './lib/lighthouse-budgets.ts';
+import { budgets, type LhrLike, type Loosened, measurePage } from './lib/lighthouse-budgets.ts';
 
 type Flags = NonNullable<Parameters<typeof lighthouse>[1]>;
 
 // Each signed-in user gets a server of their own, because Lighthouse cannot set the cookie the dev server reads.
-const pages = [
+// The map page loads MapLibre (about 1.1 MB of JavaScript, parsed on a phone throttled to a quarter of its speed), and Lighthouse here has no
+// GPU to draw with, so its performance score and blocking time are looser than everyone else's; the other budgets are the same. The numbers
+// leave room over what a laptop measures (74 and 1.5 s on the mobile run, 87 and 0.3 s on the desktop one) so a runner that is slower does not fail it.
+const MAP_COSTS: Loosened = { performance: 0.5, metrics: { 'total-blocking-time': 3000 } };
+const pages: { user: string; path: string; loosened?: Loosened }[] = [
   { user: DEV_VOLUNTEER, path: '/' },
   { user: DEV_VOLUNTEER, path: '/pool/' },
+  { user: DEV_VOLUNTEER, path: '/map/', loosened: MAP_COSTS },
   { user: DEV_ADMIN, path: '/admin/' },
 ];
 
@@ -33,7 +38,7 @@ for (const user of new Set(pages.map((p) => p.user)))
 const chrome = await startChrome();
 const problems: string[] = [];
 try {
-  for (const { user, path } of pages) {
+  for (const { user, path, loosened } of pages) {
     const origin = servers.get(user);
     if (!origin) throw new Error(`no server for ${user}`);
     const url = `http://localhost:${origin.port}${path}`;
@@ -43,6 +48,7 @@ try {
       const result = await measurePage(
         tag,
         async () => (await lighthouse(url, flags, form === 'desktop' ? desktopConfig : undefined))?.lhr ?? null,
+        loosened,
       );
       problems.push(...result.problems);
       if (result.line) console.log(`${tag.padEnd(22)} ${result.line}`);
