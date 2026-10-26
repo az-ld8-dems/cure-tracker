@@ -23,7 +23,7 @@ import type {
 import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
-import { censusLine, GeocodeError, geocodeChunk, waitingForGeocode } from './geocode.ts';
+import { censusLine, GeocodeError, geocodeChunk, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import {
   finishStage,
   graceCycles,
@@ -455,6 +455,7 @@ async function adminStats(c: Ctx): Promise<Response> {
          COALESCE(SUM(status != 'cured' AND assigned_to IS NULL), 0) AS unassigned,
          COALESCE(SUM(status != 'cured' AND flag IS NOT NULL), 0) AS flagged,
          COALESCE(SUM(status != 'cured' AND geocode IS NULL), 0) AS waiting, COALESCE(SUM(geocode = 'match'), 0) AS located,
+         COALESCE(SUM(status != 'cured' AND approximate = 1), 0) AS roughly,
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated
        FROM people`,
     )
@@ -467,6 +468,7 @@ async function adminStats(c: Ctx): Promise<Response> {
       flagged: number;
       waiting: number;
       located: number;
+      roughly: number;
       unlocated: number;
     }>();
   const sample = (await waitingForGeocode(c.db, 0, 3)).map(censusLine);
@@ -527,7 +529,13 @@ async function adminStats(c: Ctx): Promise<Response> {
     ),
     flagged: flagged.results.map((r) => toPerson(r, c.today)),
     lastUpload: last ? uploadRecord(last) : null,
-    geocode: { waiting: totals?.waiting ?? 0, matched: totals?.located ?? 0, unmatched: totals?.unlocated ?? 0, sample },
+    geocode: {
+      waiting: totals?.waiting ?? 0,
+      matched: totals?.located ?? 0,
+      approximate: totals?.roughly ?? 0,
+      unmatched: totals?.unlocated ?? 0,
+      sample,
+    },
   };
   return json(stats);
 }
@@ -685,11 +693,19 @@ async function geocode(c: Ctx, _p: string[], body: Body): Promise<Response> {
   const after = body.after === undefined ? 0 : body.after;
   if (typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0) throw new HttpError(400, 'after must be a person id or 0');
   try {
-    return json(await geocodeChunk(c.db, c.me.email, c.now, after, c.fetcher));
+    return json(await geocodeChunk(c.db, c.me.email, c.now, after, c.fetcher, body.retry === true));
   } catch (e) {
     if (e instanceof GeocodeError) throw new HttpError(502, e.message);
     throw e;
   }
+}
+
+// The people the geocoder could not place, 50 at a time, for an admin to look up by hand.
+async function unplaced(c: Ctx, _p: string[], _body: Body, url: URL): Promise<Response> {
+  const raw = url.searchParams.get('after');
+  const after = raw === null || raw === '' ? 0 : Number(raw);
+  if (!Number.isSafeInteger(after) || after < 0) throw new HttpError(400, 'after must be a person id');
+  return json(await unplacedPeople(c.db, after));
 }
 
 async function uploadColumns(c: Ctx): Promise<Response> {
@@ -841,6 +857,7 @@ const routes: Route[] = [
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, admin: true, handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/reset$/, admin: true, handler: reset },
   { method: 'POST', pattern: /^\/api\/admin\/geocode$/, admin: true, handler: geocode },
+  { method: 'GET', pattern: /^\/api\/admin\/geocode\/unplaced$/, admin: true, handler: unplaced },
   { method: 'GET', pattern: /^\/api\/admin\/uploads\/columns$/, admin: true, handler: uploadColumns },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage$/, admin: true, handler: uploadStage },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/rows$/, admin: true, handler: uploadRows },

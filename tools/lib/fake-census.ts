@@ -11,7 +11,8 @@ export interface Sent {
 
 export function fakeCensus() {
   const sent: Sent[] = [];
-  const behavior = { status: 200, throws: false, during: null as (() => void) | null };
+  // matchEverything: a later Census release that finds the places it could not find before.
+  const behavior = { status: 200, throws: false, matchEverything: false, during: null as (() => void) | null };
 
   const fetcher: typeof fetch = async (_url, init) => {
     if (behavior.throws) throw new TypeError('network down');
@@ -26,8 +27,8 @@ export function fakeCensus() {
     const answers = lines.map((line) => {
       const [id = '', street = '', city = '', state = '', zip = ''] = parseCsv(line)[0] ?? [];
       const input = `"${id}","${street}, ${city}, ${state}, ${zip}"`;
-      if (/NOWHERE/i.test(street)) return `${input},"No_Match"`;
-      if (/TIE/i.test(street)) return `"${id}","${street}, ${city}, ${state}, ${zip}","Tie"`;
+      if (!behavior.matchEverything && /NOWHERE/i.test(street)) return `${input},"No_Match"`;
+      if (!behavior.matchEverything && /TIE/i.test(street)) return `"${id}","${street}, ${city}, ${state}, ${zip}","Tie"`;
       // A point in the Phoenix area that depends on the street, longitude first, as the Census writes it.
       let h = 0;
       for (const ch of `${street} ${zip}`) h = (h * 31 + ch.charCodeAt(0)) % 100000;

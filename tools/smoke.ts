@@ -201,33 +201,49 @@ try {
   await admin.getByRole('heading', { name: 'Audit log' }).waitFor();
   await check(admin, 'admin');
 
-  // Look up where people live (the stand-in Census answers): the button says how many are waiting, then nobody is.
-  await admin.getByRole('heading', { name: 'Where people live' }).waitFor();
-  await admin.getByRole('button', { name: /^Look up \d+ addresses$/ }).click();
-  await admin.getByText(/^\d+ placed on the map, 0 waiting/).waitFor();
-  expect(
-    'admin geocode',
-    await admin.getByRole('button', { name: 'Nobody is waiting' }).isDisabled(),
-    'with nobody waiting the button is off',
-  );
-  await check(admin, 'admin geocode');
-
-  // Upload a day-two sheet: three people gone, one new, the rest the same.
+  // Upload a day-two sheet: three people gone, two new, the rest the same.
   const day2 = syntheticPeople(PEOPLE)
     .slice(3)
-    .concat([{ first: 'Newt', last: 'Newman', address: '5 W NEW ST TEMPE, AZ 85281', precinct: 'ASU WEST' }]);
+    .concat([
+      { first: 'Newt', last: 'Newman', address: '5 W NEW ST TEMPE, AZ 85281', precinct: 'ASU WEST' },
+      // The stand-in Census cannot place this one, so it ends up at the middle of its ZIP.
+      { first: 'Nora', last: 'Nowhere', address: '1 NOWHERE LN TEMPE, AZ 85281', precinct: 'ASU WEST' },
+    ]);
   await admin.getByLabel('CSV file').setInputFiles({ name: 'day2.csv', mimeType: 'text/csv', buffer: Buffer.from(sheetCsv(day2)) });
   await admin.getByRole('button', { name: 'Check the file' }).click();
   await admin.getByText('Become cured').waitFor();
   expect(
     'admin upload',
-    /^New people1/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
-    'the preview did not show 1 new person',
+    /^New people2/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    'the preview did not show 2 new people',
   );
   await check(admin, 'admin upload preview');
   await admin.getByRole('button', { name: 'Upload this file' }).click();
-  await admin.getByText('Uploaded. 1 added, 3 cured, 0 flagged.').waitFor();
+  await admin.getByText('Uploaded. 2 added, 3 cured, 0 flagged.').waitFor();
   await admin.getByText(/Last upload: day2\.csv/).waitFor();
+
+  // Look up where people live (the stand-in Census answers). One person cannot be placed: she gets the middle of her ZIP, and an admin can
+  // see her in a list, copy her address, download the list, and ask again.
+  await admin.getByRole('heading', { name: 'Where people live' }).waitFor();
+  await admin.getByRole('button', { name: /^Look up \d+ addresses$/ }).click();
+  await admin.getByText(/^\d+ placed exactly, 1 placed roughly \(the middle of their ZIP\), 0 waiting, 0 with no place\./).waitFor();
+  expect(
+    'admin geocode',
+    await admin.getByRole('button', { name: 'Nobody is waiting' }).isDisabled(),
+    'with nobody waiting the button is off',
+  );
+  await admin.getByText('Not placed exactly (1)').click();
+  const unplacedRow = admin.getByRole('row', { name: /Nora Nowhere/ });
+  await unplacedRow.waitFor();
+  expect('admin geocode', /Middle of their ZIP/.test((await unplacedRow.textContent()) ?? ''), 'the list should say what she has for now');
+  await check(admin, 'admin geocode');
+  const [download] = await Promise.all([
+    admin.waitForEvent('download'),
+    admin.getByRole('button', { name: 'Download the list as a CSV' }).click(),
+  ]);
+  expect('admin geocode', download.suggestedFilename() === 'unplaced-addresses.csv', 'the list should download as a CSV');
+  await admin.getByRole('button', { name: 'Look up the unplaced again' }).click();
+  await admin.getByText(/Looked up 1 address: 0 placed/).waitFor();
 
   // The grace period saves, and shows after a reload.
   await admin.getByLabel('Uploads a contacted person may stay on the list').fill('0');

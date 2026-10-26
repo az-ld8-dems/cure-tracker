@@ -1,13 +1,16 @@
 // Looks up where people live: sends their street addresses, and nothing else about them, to the US Census Bureau's batch geocoder and
 // stores the coordinates it answers with. Run by an admin from the admin page, a couple of hundred people a request, because a free
 // Worker has about 10 ms of CPU a request and no limit on how long it waits for an answer. Only erasable TypeScript syntax.
-import type { GeocodeProgress } from '../src/api.d.ts';
+import type { GeocodeProgress, UnplacedPage } from '../src/api.d.ts';
 import { parseCsv, streetLine } from '../src/sheet.ts';
 import type { Db } from './db.ts';
 
 // People looked up in one request. The Census takes up to 10,000 in a batch; this many keeps the Worker's own work (writing the request
 // and reading the answer) small, and a failed request costs little.
 export const GEOCODE_CHUNK = 200;
+// A ZIP needs this many people the geocoder placed before its middle stands in for someone it could not: fewer, and the middle could be one
+// person's house.
+export const ZIP_PLACE_MIN = 5;
 export const CENSUS_URL = 'https://geocoding.geo.census.gov/geocoder/locations/addressbatch';
 // The Census's current benchmark: the address ranges as of the latest release.
 const BENCHMARK = 'Public_AR_Current';
@@ -29,14 +32,31 @@ const quoted = (s: string): string => `"${s.replaceAll('"', '""')}"`;
 export const censusLine = (p: Waiting): string =>
   [String(p.id), quoted(streetLine(p.address, p.city)), quoted(p.city), 'AZ', quoted(p.zip)].join(',');
 
-// Who is still waiting: open people with no answer yet, after `after`, in id order.
-export async function waitingForGeocode(db: Db, after: number, limit: number): Promise<Waiting[]> {
+// Who is still waiting: open people with no answer yet, after `after`, in id order. With `retry`, also those the geocoder could not place
+// last time (a tie or a miss can come out differently after the Census updates its data).
+export async function waitingForGeocode(db: Db, after: number, limit: number, retry = false): Promise<Waiting[]> {
   const { results } = await db
-    .prepare("SELECT id, address, city, zip FROM people WHERE id > ?1 AND status != 'cured' AND geocode IS NULL ORDER BY id LIMIT ?2")
-    .bind(after, limit)
+    .prepare(
+      `SELECT id, address, city, zip FROM people
+       WHERE id > ?1 AND status != 'cured' AND (geocode IS NULL OR (?3 = 1 AND geocode IN ('no_match', 'tie'))) ORDER BY id LIMIT ?2`,
+    )
+    .bind(after, limit, retry ? 1 : 0)
     .all<Waiting>();
   return results;
 }
+
+// Puts each open person the geocoder could not place at the middle of their ZIP: the average of the people it did place there, when there
+// are enough of them. Marked approximate. People who already have a place (a guess from an earlier run) are left alone.
+const PLACE_BY_ZIP = `
+  UPDATE people SET lat = z.lat, lon = z.lon, approximate = 1, geocoded_at = ?1
+  FROM (SELECT zip, AVG(lat) AS lat, AVG(lon) AS lon FROM people WHERE geocode = 'match' AND approximate = 0 AND zip != '' GROUP BY zip
+        HAVING COUNT(*) >= ?2) z
+  WHERE people.zip = z.zip AND people.status != 'cured' AND people.geocode IN ('no_match', 'tie') AND people.lat IS NULL`;
+
+const changed = (result: unknown): number => {
+  const meta = (result as { meta?: { changes?: number } } | undefined)?.meta;
+  return meta?.changes ?? 0;
+};
 
 interface Answer {
   id: number;
@@ -62,10 +82,15 @@ export async function geocodeChunk(
   now: string,
   after: number,
   fetcher: typeof fetch = fetch,
+  retry = false,
 ): Promise<GeocodeProgress> {
-  const people = await waitingForGeocode(db, after, GEOCODE_CHUNK);
+  const people = await waitingForGeocode(db, after, GEOCODE_CHUNK, retry);
   const last = people.at(-1);
-  if (!last) return { sent: 0, matched: 0, noMatch: 0, unanswered: 0, next: null };
+  if (!last) {
+    // Nobody left to send: the run is over, so those it could not place get the middle of their ZIP.
+    const approximated = changed(await db.prepare(PLACE_BY_ZIP).bind(now, ZIP_PLACE_MIN).run());
+    return { sent: 0, matched: 0, noMatch: 0, unanswered: 0, approximated, next: null };
+  }
 
   const form = new FormData();
   form.append('addressFile', new Blob([people.map(censusLine).join('\n')], { type: 'text/csv' }), 'addresses.csv');
@@ -101,13 +126,17 @@ export async function geocodeChunk(
   }
 
   const matched = answers.filter((a) => a.geocode === 'match').length;
-  // The address is checked again as it is written, in case an upload changed it while the Census was thinking.
-  await db.batch([
+  const lastChunk = people.length < GEOCODE_CHUNK;
+  // The address is checked again as it is written, in case an upload changed it while the Census was thinking. A miss keeps a guess an
+  // earlier run made (retrying must not take it away). The last chunk ends the run, and those still unplaced get the middle of their ZIP.
+  const results = await db.batch([
     db
       .prepare(
         `WITH j AS (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.address') AS address, json_extract(value, '$.geocode') AS geocode,
            json_extract(value, '$.lat') AS lat, json_extract(value, '$.lon') AS lon FROM json_each(?1))
-         UPDATE people SET lat = j.lat, lon = j.lon, geocode = j.geocode, geocoded_at = ?2
+         UPDATE people SET
+           lat = CASE WHEN j.geocode = 'match' THEN j.lat ELSE people.lat END, lon = CASE WHEN j.geocode = 'match' THEN j.lon ELSE people.lon END,
+           approximate = CASE WHEN j.geocode = 'match' THEN 0 ELSE people.approximate END, geocode = j.geocode, geocoded_at = ?2
          FROM j WHERE people.id = j.id AND people.address = j.address`,
       )
       .bind(JSON.stringify(answers), now),
@@ -117,14 +146,50 @@ export async function geocodeChunk(
         now,
         actor,
         'geocode',
-        JSON.stringify({ sent: people.length, matched, noMatch: answers.length - matched, unanswered: asked.size }),
+        JSON.stringify({ sent: people.length, matched, noMatch: answers.length - matched, unanswered: asked.size, retry }),
       ),
+    ...(lastChunk ? [db.prepare(PLACE_BY_ZIP).bind(now, ZIP_PLACE_MIN)] : []),
   ]);
   return {
     sent: people.length,
     matched,
     noMatch: answers.length - matched,
     unanswered: asked.size,
-    next: people.length === GEOCODE_CHUNK ? last.id : null,
+    approximated: lastChunk ? changed(results[2]) : 0,
+    next: lastChunk ? null : last.id,
+  };
+}
+
+export const UNPLACED_PAGE = 50;
+
+interface UnplacedRow {
+  id: number;
+  first_name: string;
+  last_name: string;
+  address: string;
+  geocode: 'no_match' | 'tie';
+  approximate: number;
+}
+
+// Open people the geocoder could not place, 50 at a time after `after`, for an admin to look up by hand. `approximate` says they have the
+// middle of their ZIP in the meantime.
+export async function unplacedPeople(db: Db, after: number): Promise<UnplacedPage> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, first_name, last_name, address, geocode, approximate FROM people
+       WHERE id > ?1 AND status != 'cured' AND geocode IN ('no_match', 'tie') ORDER BY id LIMIT ?2`,
+    )
+    .bind(after, UNPLACED_PAGE + 1)
+    .all<UnplacedRow>();
+  const page = results.slice(0, UNPLACED_PAGE);
+  return {
+    people: page.map((r) => ({
+      id: r.id,
+      name: `${r.first_name} ${r.last_name}`,
+      address: r.address,
+      reason: r.geocode,
+      approximate: r.approximate === 1,
+    })),
+    next: results.length > UNPLACED_PAGE ? (page.at(-1)?.id ?? null) : null,
   };
 }

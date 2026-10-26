@@ -13,6 +13,7 @@ import type {
   Person,
   PossibleMatch,
   ResetResult,
+  UnplacedPage,
   UploadPreview,
   UploadRecord,
   Volunteer,
@@ -69,7 +70,7 @@ if (me && !me.isAdmin) {
   };
 
   const heading = (id: string, text: string) => h('h2', { id }, text);
-  const table = (label: string, head: string[], rows: (Node | string)[][], numeric: number[] = []) =>
+  const table = (label: string, head: (Node | string)[], rows: (Node | string)[][], numeric: number[] = []) =>
     h(
       'div',
       { class: 'fl-table-wrap', role: 'region', 'aria-label': label, tabindex: '0' },
@@ -384,48 +385,147 @@ if (me && !me.isAdmin) {
   function geocodeSection(s: AdminStats): void {
     const g = s.geocode;
     const status = h('p', { class: 'fl-help', role: 'status' });
+
+    // Looks up, a chunk at a time, until nobody is left. `retry` asks again about those the geocoder could not place.
+    async function lookUp(buttons: HTMLButtonElement[], retry: boolean, total: number): Promise<void> {
+      for (const b of buttons) b.disabled = true;
+      let after = 0;
+      let sent = 0;
+      let placed = 0;
+      let roughly = 0;
+      let tenth = -1;
+      try {
+        for (;;) {
+          const r = await api<GeocodeProgress>('POST', '/api/admin/geocode', { after, retry });
+          sent += r.sent;
+          placed += r.matched;
+          roughly += r.approximated;
+          // Say so at every tenth: the status line is read out as it changes.
+          if (Math.floor((sent * 10) / Math.max(1, total)) !== tenth) {
+            tenth = Math.floor((sent * 10) / Math.max(1, total));
+            status.textContent = `Looked up ${sent} of ${total} addresses: ${placed} placed…`;
+          }
+          if (r.next === null) break;
+          after = r.next;
+        }
+        toast(
+          `Looked up ${plural(sent, 'address', 'addresses')}: ${placed} placed${roughly > 0 ? `, ${roughly} put at the middle of their ZIP` : ''}.`,
+        );
+        await refresh();
+      } catch (e) {
+        for (const b of buttons) b.disabled = false;
+        status.textContent = `Stopped after ${sent} addresses: ${failureText(e)} Press the button to go on; the ones already done are not sent again.`;
+      }
+    }
+
     const go = h(
       'button',
-      {
-        class: 'btn',
-        type: 'button',
-        disabled: g.waiting === 0,
-        onclick: async () => {
-          go.disabled = true;
-          let after = 0;
-          let sent = 0;
-          let placed = 0;
-          let tenth = -1;
-          try {
-            for (;;) {
-              const r = await api<GeocodeProgress>('POST', '/api/admin/geocode', { after });
-              sent += r.sent;
-              placed += r.matched;
-              // Say so at every tenth: the status line is read out as it changes.
-              if (Math.floor((sent * 10) / g.waiting) !== tenth) {
-                tenth = Math.floor((sent * 10) / g.waiting);
-                status.textContent = `Looked up ${sent} of ${g.waiting} addresses: ${placed} placed…`;
-              }
-              if (r.next === null) break;
-              after = r.next;
-            }
-            toast(`Looked up ${plural(sent, 'address', 'addresses')}: ${placed} placed.`);
-            await refresh();
-          } catch (e) {
-            go.disabled = false;
-            status.textContent = `Stopped after ${sent} addresses: ${failureText(e)} Press the button to go on; the ones already done are not sent again.`;
-          }
-        },
-      },
+      { class: 'btn', type: 'button', disabled: g.waiting === 0, onclick: () => lookUp([go, again], false, g.waiting) },
       g.waiting === 0 ? 'Nobody is waiting' : `Look up ${plural(g.waiting, 'address', 'addresses')}`,
     );
+    const again = h(
+      'button',
+      { class: 'btn', type: 'button', disabled: g.unmatched === 0, onclick: () => lookUp([go, again], true, g.unmatched) },
+      'Look up the unplaced again',
+    );
+
+    // The people it could not place, so an admin can look them up by hand: loaded when the list is first opened, 50 at a time.
+    const rows = h('div', { class: 'fl-stack fl-stack--3' });
+    let shown: UnplacedPage['people'] = [];
+    let loaded = false;
+    const WHY = { no_match: 'No match', tie: 'More than one place' } as const;
+    async function loadMore(after: number): Promise<void> {
+      const page = await api<UnplacedPage>('GET', `/api/admin/geocode/unplaced?after=${after}`);
+      shown = [...shown, ...page.people];
+      clear(
+        rows,
+        shown.length === 0
+          ? h('p', { class: 'fl-help' }, 'Everyone has a place.')
+          : table(
+              'People the geocoder could not place',
+              ['Person', 'Address', 'Why', 'For now', h('span', { class: 'fl-sr-only' }, 'Copy')],
+              shown.map((p) => [
+                p.name,
+                addressText(p.address),
+                WHY[p.reason],
+                p.approximate ? 'Middle of their ZIP' : 'No place',
+                h(
+                  'button',
+                  {
+                    class: 'fl-btn fl-btn--sm',
+                    type: 'button',
+                    'aria-label': `Copy the address of ${p.name}`,
+                    onclick: async () => {
+                      await navigator.clipboard.writeText(addressText(p.address));
+                      toast('Address copied.');
+                    },
+                  },
+                  'Copy',
+                ),
+              ]),
+            ),
+        page.next === null
+          ? null
+          : h('button', { class: 'fl-btn', type: 'button', onclick: () => void loadMore(page.next ?? 0) }, 'Show more'),
+      );
+    }
+    // The whole list as a CSV, to take to another tool.
+    async function download(): Promise<void> {
+      const lines = ['NAME,ADDRESS,WHY,FOR_NOW'];
+      const quote = (v: string) => `"${v.replaceAll('"', '""')}"`;
+      for (let after = 0; ; ) {
+        const page = await api<UnplacedPage>('GET', `/api/admin/geocode/unplaced?after=${after}`);
+        for (const p of page.people)
+          lines.push([p.name, p.address, WHY[p.reason], p.approximate ? 'middle of ZIP' : 'none'].map(quote).join(','));
+        if (page.next === null) break;
+        after = page.next;
+      }
+      const link = h('a', {
+        href: URL.createObjectURL(new Blob([`${lines.join('\n')}\n`], { type: 'text/csv' })),
+        download: 'unplaced-addresses.csv',
+      });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    }
+    const list = h(
+      'details',
+      { class: 'fl-disclosure' },
+      h('summary', {}, `Not placed exactly (${g.unmatched})`),
+      h(
+        'div',
+        { class: 'fl-stack fl-stack--3' },
+        h(
+          'p',
+          { class: 'fl-help' },
+          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
+        ),
+        rows,
+        h(
+          'div',
+          { class: 'fl-cluster' },
+          h('button', { class: 'btn', type: 'button', onclick: () => void download() }, 'Download the list as a CSV'),
+        ),
+      ),
+    );
+    list.addEventListener('toggle', () => {
+      if (!list.open || loaded) return;
+      loaded = true;
+      void loadMore(0);
+    });
+
     clear(
       sections.geocode,
       heading('h-geocode', 'Where people live'),
       h(
         'div',
         { class: 'fl-card' },
-        h('p', {}, `${g.matched} placed on the map, ${g.waiting} waiting, ${g.unmatched} the geocoder could not place.`),
+        h(
+          'p',
+          {},
+          `${g.matched} placed exactly, ${g.approximate} placed roughly (the middle of their ZIP), ${g.waiting} waiting, ${g.unmatched - g.approximate} with no place.`,
+        ),
         h(
           'p',
           { class: 'fl-help' },
@@ -439,8 +539,9 @@ if (me && !me.isAdmin) {
               h('ul', { class: 'fl-list' }, ...g.sample.map((line) => h('li', {}, h('code', {}, line)))),
             )
           : null,
-        go,
+        h('div', { class: 'fl-cluster' }, go, again),
         status,
+        g.unmatched > 0 ? list : null,
       ),
     );
   }
