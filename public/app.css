@@ -535,3 +535,9 @@ th[aria-sort="descending"] > .pool-sort::after {
   border-color: var(--pin-guess);
   background: var(--surface-raised);
 }
+
+.pin--you {
+  border-color: var(--surface-raised);
+  background: var(--pin-you);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pin-you) 35%, transparent);
+}

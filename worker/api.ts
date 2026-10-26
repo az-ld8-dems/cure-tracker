@@ -302,44 +302,23 @@ function filterParam(url: URL, name: string): string {
   return v;
 }
 
-// People, a page at a time. scope=pool (the default) is who still needs a volunteer, scope=mine is the caller's own people, and
-// scope=all (admins) is everyone. sort (days, precinct, city or name) runs the other way with dir=desc. city, precinct (ignoring case)
-// and party match exactly, which the indexes in migration 0003 answer; q (name, street and, for admins, phone) matches any part, which
-// reads every row that is left after the other filters. There is no count: the page asks for one person more than it shows (hasMore).
-async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Promise<Response> {
-  const scope = url.searchParams.get('scope') ?? 'pool';
-  if (scope !== 'pool' && scope !== 'mine' && scope !== 'all') throw new HttpError(400, 'scope must be pool, mine or all');
-  if (scope === 'all' && !c.isAdmin) throw new HttpError(403, 'Forbidden');
-  // "Within N miles" of the place the volunteer saved: only for the pool, and only with a saved place. Sorting by distance needs it too,
-  // because a sort over everyone would read the whole pool.
+// "Within N miles" of the place the volunteer saved (the miles parameter), or null without one. A radius is what keeps a search by distance
+// cheap, so sorting by distance needs one too.
+async function nearOf(c: Ctx, url: URL): Promise<{ where: string; away: string } | null> {
   const milesRaw = url.searchParams.get('miles') ?? '';
-  let near: { where: string; away: string } | null = null;
-  if (milesRaw !== '') {
-    if (scope !== 'pool') throw new HttpError(400, 'miles only applies to the pool');
-    const miles = Number(milesRaw);
-    if (!Number.isFinite(miles) || miles < 0.5 || miles > 100) throw new HttpError(400, 'miles must be from 0.5 to 100');
-    const home = await homeOf(c.db, c.me.id);
-    if (!home) throw new HttpError(400, 'Save your location first');
-    near = nearSql(home, miles);
-  }
-  const sortName = url.searchParams.get('sort') ?? 'days';
-  if (sortName === 'distance' && !near) throw new HttpError(400, 'Sorting by distance needs miles and a saved location');
-  const terms = sortName === 'distance' ? ['away', 'p.id'] : PEOPLE_SORTS.get(sortName);
-  if (terms === undefined) throw new HttpError(400, `sort must be one of ${[...PEOPLE_SORTS.keys(), 'distance'].join(', ')}`);
-  const dir = url.searchParams.get('dir') ?? 'asc';
-  if (dir !== 'asc' && dir !== 'desc') throw new HttpError(400, 'dir must be asc or desc');
-  const order = terms.map((t) => (dir === 'desc' ? `${t} DESC` : t)).join(', ');
-  const limit = intParam(url, 'limit', scope === 'mine' ? MAX_MINE : DEFAULT_PAGE, 1, scope === 'mine' ? MAX_MINE : MAX_PAGE);
-  const offset = intParam(url, 'offset', 0, 0, 1_000_000);
+  if (milesRaw === '') return null;
+  const miles = Number(milesRaw);
+  if (!Number.isFinite(miles) || miles < 0.5 || miles > 100) throw new HttpError(400, 'miles must be from 0.5 to 100');
+  const home = await homeOf(c.db, c.me.id);
+  if (!home) throw new HttpError(400, 'Save your location first');
+  return nearSql(home, miles);
+}
 
+// The city, party, precinct and search filters the list and the map share (city and precinct ignoring case, party exactly, the search as any
+// part of the name and street, and of the phone for those who organize).
+function narrowBy(url: URL, withPhone: boolean): { where: string[]; binds: Value[] } {
   const where: string[] = [];
   const binds: Value[] = [];
-  if (scope === 'pool') where.push(POOL_WHERE);
-  if (scope === 'mine') {
-    where.push('p.assigned_to = ?');
-    binds.push(c.me.id);
-  }
-  if (near) where.push(near.where);
   const city = filterParam(url, 'city');
   if (city !== '') {
     where.push('p.city COLLATE NOCASE = ?');
@@ -358,12 +337,48 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
   const q = filterParam(url, 'q');
   if (q !== '') {
     where.push(
-      c.isAdmin
+      withPhone
         ? "(p.first_name || ' ' || p.last_name || ' ' || p.address || ' ' || p.phone) LIKE ? ESCAPE '\\'"
         : "(p.first_name || ' ' || p.last_name || ' ' || p.address) LIKE ? ESCAPE '\\'",
     );
     binds.push(containing(q));
   }
+  return { where, binds };
+}
+
+// People, a page at a time. scope=pool (the default) is who still needs a volunteer, scope=mine is the caller's own people, and
+// scope=all (admins) is everyone. sort (days, precinct, city or name) runs the other way with dir=desc. city, precinct (ignoring case)
+// and party match exactly, which the indexes in migration 0003 answer; q (name, street and, for admins, phone) matches any part, which
+// reads every row that is left after the other filters. There is no count: the page asks for one person more than it shows (hasMore).
+async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Promise<Response> {
+  const scope = url.searchParams.get('scope') ?? 'pool';
+  if (scope !== 'pool' && scope !== 'mine' && scope !== 'all') throw new HttpError(400, 'scope must be pool, mine or all');
+  if (scope === 'all' && !c.isAdmin) throw new HttpError(403, 'Forbidden');
+  // "Within N miles" of the place the volunteer saved: only for the pool, and only with a saved place. Sorting by distance needs it too,
+  // because a sort over everyone would read the whole pool.
+  if ((url.searchParams.get('miles') ?? '') !== '' && scope !== 'pool') throw new HttpError(400, 'miles only applies to the pool');
+  const near = await nearOf(c, url);
+  const sortName = url.searchParams.get('sort') ?? 'days';
+  if (sortName === 'distance' && !near) throw new HttpError(400, 'Sorting by distance needs miles and a saved location');
+  const terms = sortName === 'distance' ? ['away', 'p.id'] : PEOPLE_SORTS.get(sortName);
+  if (terms === undefined) throw new HttpError(400, `sort must be one of ${[...PEOPLE_SORTS.keys(), 'distance'].join(', ')}`);
+  const dir = url.searchParams.get('dir') ?? 'asc';
+  if (dir !== 'asc' && dir !== 'desc') throw new HttpError(400, 'dir must be asc or desc');
+  const order = terms.map((t) => (dir === 'desc' ? `${t} DESC` : t)).join(', ');
+  const limit = intParam(url, 'limit', scope === 'mine' ? MAX_MINE : DEFAULT_PAGE, 1, scope === 'mine' ? MAX_MINE : MAX_PAGE);
+  const offset = intParam(url, 'offset', 0, 0, 1_000_000);
+
+  const where: string[] = [];
+  const binds: Value[] = [];
+  if (scope === 'pool') where.push(POOL_WHERE);
+  if (scope === 'mine') {
+    where.push('p.assigned_to = ?');
+    binds.push(c.me.id);
+  }
+  if (near) where.push(near.where);
+  const narrowed = narrowBy(url, c.isAdmin);
+  where.push(...narrowed.where);
+  binds.push(...narrowed.binds);
 
   const clause = where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`;
   const { results } = await c.db
@@ -414,7 +429,16 @@ const toAudit = (r: AuditRow): AuditEntry => ({
 async function mapPins(c: Ctx, _p: string[], _b: Body, url: URL): Promise<Response> {
   const box = boxOf(url.searchParams);
   if (!box) throw new HttpError(400, 'Send west, south, east and north: a box in the United States');
-  return json({ ...(await pinsIn(c.db, box)), tiles: await c.tilesReady() });
+  // The same filters as Find people (city, precinct, party, search, and a radius around the saved place), so the map can show part of the pool.
+  const narrowed = narrowBy(url, false);
+  const near = await nearOf(c, url);
+  if (near) narrowed.where.push(near.where);
+  const found = await pinsIn(c.db, box, narrowed);
+  return json({
+    ...found,
+    tiles: await c.tilesReady(),
+    ...(url.searchParams.get('facets') === '1' && { facets: await savedFacets(c.db) }),
+  });
 }
 
 async function getPerson(c: Ctx, p: string[]): Promise<Response> {
