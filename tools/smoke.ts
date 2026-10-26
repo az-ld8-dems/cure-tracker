@@ -502,6 +502,17 @@ try {
   await check(admin, 'admin: who organizes');
   await admin.getByRole('button', { name: 'Change what Olive Organizer organizes' }).click();
   await check(admin, 'admin: change what a volunteer organizes');
+  // Precincts are picked from the district's list, one at a time, and show as buttons that take one away.
+  await admin.getByLabel('Or only these precincts').fill('Alma');
+  await admin.locator('.fl-combobox__list [role="option"]').first().click();
+  await admin
+    .getByRole('button', { name: /^Remove / })
+    .first()
+    .waitFor();
+  await admin
+    .getByRole('button', { name: /^Remove / })
+    .first()
+    .click();
   await admin.getByLabel('All precincts').check();
   await admin.getByRole('button', { name: 'Save access' }).click();
   await admin.getByText('Saved what Olive Organizer organizes.').waitFor();

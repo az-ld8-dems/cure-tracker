@@ -51,7 +51,7 @@ The repository being public means everything in it is public. Nothing here is se
 
 ## 5. Before the real data: turn the reset off
 
-`ALLOW_RESET` in `wrangler.jsonc` starts as `"true"`, so admins can use **Start over** to delete every voter while you play with test data. Before the real sheet goes in, set it to `"false"` and deploy (`npm run deploy`): the reset route then refuses and the button is gone. If a reset happens by mistake with it on, restore the database (see Backups).
+`ALLOW_RESET` in `wrangler.jsonc` is `"false"`: the reset route refuses and **Start over** is not on the admin page. To delete every voter while you play with test data, set it to `"true"` and deploy (`npm run deploy`), and set it back to `"false"` before the real sheet goes in. If a reset happens by mistake with it on, restore the database (see Backups).
 
 ## 6. First upload
 

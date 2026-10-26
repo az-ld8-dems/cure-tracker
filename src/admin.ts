@@ -404,14 +404,58 @@ if (me && !me.isAdmin && !me.organizes) {
     const form = (v: Volunteer): HTMLElement => {
       const g = grantOf(v.id);
       const all = h('input', { id: 'grant-all', type: 'checkbox', checked: g?.all === true });
+      // The precincts so far, as buttons that take one away; the box finds the next one on the district's list.
+      let chosen = g && !g.all ? [...g.precincts] : [];
+      const chips = h('ul', { class: 'fl-cluster', 'aria-label': 'Chosen precincts' });
+      const showChosen = (): void => {
+        clear(
+          chips,
+          ...chosen.map((name) =>
+            h(
+              'li',
+              {},
+              h(
+                'button',
+                {
+                  class: 'fl-chip',
+                  type: 'button',
+                  'aria-label': `Remove ${name}`,
+                  onclick: () => {
+                    chosen = chosen.filter((c) => c !== name);
+                    showChosen();
+                  },
+                },
+                `${name} ×`,
+              ),
+            ),
+          ),
+        );
+        chips.hidden = chosen.length === 0;
+      };
+      showChosen();
       const list = h('input', {
         class: 'fl-input',
         id: 'grant-precincts',
         type: 'text',
         autocomplete: 'off',
-        list: 'grant-known',
-        maxlength: '2000',
-        value: g && !g.all ? g.precincts.join(', ') : '',
+        placeholder: 'Type a precinct or a city',
+      });
+      // The combobox puts its list after the input, which is not in the page yet, so the list is made here and placed with the input.
+      const matches = h('ul', {});
+      window.Frostline.combobox(list, {
+        list: matches,
+        label: 'Precincts of the district',
+        openOnFocus: true,
+        options: (query) => {
+          const q = query.trim().toLowerCase();
+          return PRECINCTS.filter(([city, name]) => !chosen.includes(name) && `${name} ${city}`.toLowerCase().includes(q)).map(
+            ([city, name]) => ({ id: name, label: name, sub: city }),
+          );
+        },
+        onPick: (item) => {
+          chosen = [...chosen, item.id];
+          showChosen();
+        },
       });
       return h(
         'form',
@@ -419,10 +463,7 @@ if (me && !me.isAdmin && !me.organizes) {
           class: 'fl-card fl-stack fl-stack--3',
           onsubmit: async (event: Event) => {
             event.preventDefault();
-            const precincts = list.value
-              .split(',')
-              .map((t) => t.trim())
-              .filter((t) => t !== '');
+            const precincts = chosen;
             try {
               await api<OrganizerGrant>('PUT', `/api/admin/volunteers/${v.id}/organizer`, { all: all.checked, precincts });
               toast(`Saved what ${volunteerName(v)} organizes.`);
@@ -445,10 +486,10 @@ if (me && !me.isAdmin && !me.organizes) {
         field(
           'grant-precincts',
           'Or only these precincts',
-          list,
-          'Precincts of the district, separated with commas (the box suggests them). Leave it empty, with the box unchecked, to take the access away. People with no precinct can be moved by anyone who organizes.',
+          h('div', { class: 'fl-stack fl-stack--3' }, list, matches),
+          'Pick precincts of the district from the list, one at a time. Take them all away, with the box unchecked, to remove the access. People with no precinct can be moved by anyone who organizes.',
         ),
-        h('datalist', { id: 'grant-known' }, ...PRECINCTS.map(([city, name]) => h('option', { value: name }, city))),
+        chips,
         h(
           'div',
           { class: 'fl-cluster' },
@@ -800,8 +841,37 @@ if (me && !me.isAdmin && !me.organizes) {
             'Volunteers and their people',
             ['Volunteer', 'Open', 'To contact', 'Voicemail', 'Contacted', 'Cured', 'Flagged', 'Last seen', 'Move all open people to'],
             s.volunteers.map((v) => {
-              const to = volunteerSelect(`move-${v.id}`, null, 'Back to the pool', v.id);
-              to.setAttribute('aria-label', `Move everyone ${volunteerName(v)} has open`);
+              // Who gets them: type to find a volunteer, or leave the box empty to send them back to the pool. The list opens in the row
+              // (the table scrolls sideways, which would clip a floating one).
+              const to = h('input', {
+                class: 'fl-input',
+                id: `move-${v.id}`,
+                type: 'text',
+                autocomplete: 'off',
+                placeholder: 'Back to the pool',
+                'aria-label': `Move everyone ${volunteerName(v)} has open to`,
+              });
+              let target: number | null = null;
+              const matches = h('ul', {});
+              window.Frostline.combobox(to, {
+                list: matches,
+                mode: 'suggest',
+                label: 'Volunteers',
+                openOnFocus: true,
+                options: (query) => {
+                  const q = query.trim().toLowerCase();
+                  return [...volunteers.values()]
+                    .filter((o) => o.id !== v.id && `${volunteerName(o)} ${o.email}`.toLowerCase().includes(q))
+                    .map((o) => ({ id: String(o.id), label: volunteerName(o), ...(o.name && { sub: o.email }) }));
+                },
+                onPick: (item) => {
+                  target = Number(item.id);
+                },
+              });
+              // Typing again drops the pick until a volunteer is picked again.
+              to.addEventListener('input', () => {
+                target = null;
+              });
               const move = h('button', { class: 'fl-btn fl-btn--sm', type: 'button', disabled: v.assigned === 0 }, 'Move');
               // Moving a volunteer's whole list is one step too big to do on one click: Frostline asks first, in place.
               window.Frostline.confirm(move, {
@@ -809,8 +879,12 @@ if (me && !me.isAdmin && !me.organizes) {
                 confirmLabel: 'Move them',
                 cancelLabel: 'Keep them',
                 onConfirm: async () => {
+                  if (to.value.trim() !== '' && target === null) {
+                    toast('Pick a volunteer from the list, or empty the box to send them to the pool.', 'error');
+                    return;
+                  }
                   try {
-                    const r = await api<{ moved: number }>('POST', `/api/admin/volunteers/${v.id}/reassign`, { volunteerId: idOrNull(to) });
+                    const r = await api<{ moved: number }>('POST', `/api/admin/volunteers/${v.id}/reassign`, { volunteerId: target });
                     toast(`Moved ${plural(r.moved, 'person', 'people')} from ${volunteerName(v)}.`);
                     await refresh();
                   } catch (e) {
@@ -827,7 +901,7 @@ if (me && !me.isAdmin && !me.organizes) {
                 String(v.cured),
                 String(v.flagged),
                 dateTime(v.lastSeenAt),
-                h('span', { class: 'fl-cluster' }, to, move),
+                h('div', { class: 'fl-stack fl-stack--3' }, h('div', { class: 'fl-cluster' }, to, move), matches),
               ];
             }),
             [1, 2, 3, 4, 5, 6],
