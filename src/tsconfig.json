@@ -18,6 +18,10 @@
     "removeComments": true,
     "newLine": "lf",
     "skipLibCheck": true,
+    "paths": {
+      "/lib/maplibre-gl.js": ["../node_modules/maplibre-gl/dist/maplibre-gl.d.ts"],
+      "/lib/pmtiles.js": ["../node_modules/pmtiles/dist/esm/index.d.ts"]
+    },
     "rootDir": ".",
     "outDir": "../public/js"
   },

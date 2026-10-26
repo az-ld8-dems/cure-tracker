@@ -40,7 +40,7 @@ An admin presses **Look up addresses** (admin page, "Where people live"). The Wo
 
 **Placing someone by hand.** In the list, each person has a box for coordinates (write latitude, then longitude, as a map gives them: `33.4295, -111.9628`) with **Set** and, once set, **Clear** (`POST /api/admin/people/:id/place`). The place is stored to about a metre and counts as placed exactly, recorded in `people.placed_by` with the admin's email and in the audit log (which says which person and who, not where). The geocoder's verdict stays as it was, so the person stays in the list, to be corrected or taken away. A later lookup that misses leaves the hand-set place alone; one that finds the person replaces it and clears "by hand"; an upload that changes the address clears it with the rest. Only a place set by hand can be cleared this way. A cured person cannot be placed.
 
-**For the map:** approximate places are drawn as a different color of pin from exact ones, with a legend saying so (Avi's requirement). The map itself is still to come.
+**For the map:** approximate places are drawn differently from exact ones, with a legend saying so (Avi's requirement; see **The map**, below).
 
 ### Near me
 
@@ -67,12 +67,20 @@ Safeguards:
 
 While trying the tool with test data, an admin can use **Start over** (bottom of the admin page) to delete every voter, every note and the upload history. A dialog asks first. Volunteers, the grace period setting and the audit log stay, and the log gets a row saying how much was deleted. It exists only where the deployment turns it on: `ALLOW_RESET` in `wrangler.jsonc` is `"true"`; set it to `"false"` and deploy before the real sheet goes in, and the route refuses and the section disappears. The API also requires the body `{ "confirm": "delete all voters" }`, so a stray request cannot do it.
 
+## The map
+
+**Map** (in the header, for everyone signed in) shows the open pool (not claimed, not cured) as pins on a map of LD8. A solid blue dot is a place the geocoder found or an admin set; a copper ring is a guess (the middle of a ZIP, or a match the Census calls non-exact); the legend above the map says so, and the shapes differ as well as the colors. Pins close together are a numbered group; pressing one zooms in. Pressing a pin shows that person's name, status, days uncured, address and a **Claim** button under the map, and marks the pin. People with no place at all are not on the map (Find people lists them); the page says how many pins are guesses. **Refresh** asks again.
+
+How it works. The page asks `GET /api/map?west&south&east&north` once for the district and a margin (not for each pan: each ask reads the whole pool's places from the `people_pool_place` index, about as many rows as there are people, so on the free plan the map loads once and refreshes by hand or after a claim). The answer is `[id, lat, lon, guess]` per person and nothing else: no names, addresses or phones. The Worker sends at most 20,000 and says when it stopped. The street map is a PMTiles file (a Protomaps basemap cut to a box around LD8) in the R2 bucket `cure-tracker-tiles`, served at `/tiles/ld8.pmtiles` by the Worker, with byte-range support, behind the same Access check as the rest. While the file is missing the page says so and draws only the pins. MapLibre, the PMTiles reader, the basemap styles (light and dark, made by `tools/map-style.ts` from `@protomaps/basemaps`) and the labels' fonts are served from `/lib/` on our own origin; the CSP allows nothing else. The map follows the theme (the basemap is the light or dark flavor).
+
+The map is a canvas. Its pins cannot be reached with a keyboard or a screen reader, so the page says to use Find people, which lists the same people and can sort by distance.
+
 ## Audit log
 
 Every change writes a row: who, when, what, which person. Joining, renaming, claims, releases, status changes, notes, assignments, reassignments, flag dismissals, uploads and what each upload cured, flagged or reopened. Admins read it newest first on the admin page.
 
 ## Limits and things not built
 
-- No distance sorting yet: Find people sorts and filters by days uncured, city, precinct, party and name. Addresses can be placed on the map by the Census geocoder (above); showing them and sorting by distance come next. The geocoder is the only outside service the Worker calls.
+- The geocoder is the only outside service the Worker calls. The map's pins are the pool only (not a volunteer's own people), and show nothing about the volunteer's own place.
 - No notifications, no email, no SMS from the app. Volunteers call or text from their own phones (the phone number is a `tel:` link).
 - D1 and Worker limits matter for big uploads (docs/decisions.md, 17): the browser reads the file, each request carries about a hundred people and one SQL statement, and the comparison and the changes are set operations inside D1. `npm run bench` times it on a synthetic 10,000-person sheet. Staging costs about one row written per person and is cleared after.

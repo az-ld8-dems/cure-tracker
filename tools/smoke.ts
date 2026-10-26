@@ -7,13 +7,15 @@
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { type Browser, type BrowserContext, chromium, firefox, type Page, webkit } from 'playwright';
+import { chromiumQuirks } from './lib/chromium-quirks.ts';
 import { DEV_ADMIN, startDevServer } from './lib/dev-server.ts';
+import { firefoxQuirks } from './lib/firefox-quirks.ts';
 import { sheetCsv, syntheticPeople } from './lib/sheet.ts';
 import { webkitQuirks } from './lib/webkit-quirks.ts';
 
 // Every page links the vendored Frostline's versioned folder: the version in the HTML must be the one that is built.
 const frostline = readFileSync(new URL('../vendor/frostline/VERSION', import.meta.url), 'utf8').trim();
-for (const file of ['index.html', 'pool/index.html', 'admin/index.html', '404.html']) {
+for (const file of ['index.html', 'pool/index.html', 'map/index.html', 'admin/index.html', '404.html']) {
   const html = readFileSync(new URL(`../public/${file}`, import.meta.url), 'utf8');
   const linked = new Set([...html.matchAll(/\/frostline\/([\d.]+)\//g)].map((m) => m[1]));
   if (linked.size !== 1 || !linked.has(frostline)) {
@@ -34,12 +36,13 @@ const PEOPLE = 40;
 const { server, port, sqlite } = await startDevServer({ people: PEOPLE });
 const base = `http://localhost:${port}`;
 const problems: string[] = [];
-// Known WebKit-only console messages that were ignored, by label (tools/lib/webkit-quirks.ts); listed at the end.
-const quirks = name === 'webkit' ? webkitQuirks : [];
+// Known browser-specific console messages that were ignored, by label (tools/lib/*-quirks.ts); listed at the end.
+const quirks = { webkit: webkitQuirks, chromium: chromiumQuirks, firefox: firefoxQuirks }[name as 'webkit'] ?? [];
 const ignored = new Map<string, number>();
 const problem = (where: string, what: string) => problems.push(`${where}: ${what}`);
 
-const browser: Browser = await launcher.launch();
+// Firefox on a runner with no graphics is told to try WebGL anyway (software drawing); if it still cannot, the map page's notice is checked instead.
+const browser: Browser = await launcher.launch(name === 'firefox' ? { firefoxUserPrefs: { 'webgl.force-enabled': true } } : {});
 
 async function context(email: string, opts: { dark?: boolean; phone?: boolean } = {}): Promise<BrowserContext> {
   const ctx = await browser.newContext({
@@ -88,6 +91,20 @@ async function check(page: Page, where: string): Promise<void> {
         .join('; ')}`,
     );
   }
+}
+
+// Waits for the map page to settle. True when the map was drawn; false when the browser has no WebGL 2 and the page said so instead, which is
+// what it should do, so that is checked here and the checks that need a map are skipped.
+async function mapDrawn(page: Page, where: string): Promise<boolean> {
+  const webgl2 = await page.evaluate(() => document.createElement('canvas').getContext('webgl2') !== null);
+  if (webgl2) {
+    await page.getByText(/people? on the map/).waitFor();
+    await page.locator('#map canvas').waitFor();
+    return true;
+  }
+  await page.getByText(/The map could not start in this browser/).waitFor();
+  console.log(`${where}: no WebGL 2 here; the page's notice was checked instead of the map`);
+  return false;
 }
 
 const expect = (where: string, ok: boolean, what: string) => {
@@ -228,6 +245,24 @@ try {
   await page.getByRole('button', { name: 'Person' }).click();
   await page.locator('th[aria-sort="descending"]').waitFor();
   await check(page, 'find people (table)');
+
+  // ---- the map: the dev server has no tile file, so the pins are drawn on a plain background and the page says so
+  await page.getByRole('link', { name: 'Map', exact: true }).click();
+  if (await mapDrawn(page, 'map')) {
+    expect('map', await page.getByRole('list', { name: 'Legend' }).isVisible(), 'the legend is not shown');
+    expect(
+      'map',
+      /Address found/.test((await page.getByRole('list', { name: 'Legend' }).textContent()) ?? ''),
+      'the legend lacks the exact pin',
+    );
+    expect('map', /guess/.test((await page.getByRole('list', { name: 'Legend' }).textContent()) ?? ''), 'the legend lacks the guessed pin');
+    expect(
+      'map',
+      /street map has not been set up/.test((await page.getByRole('status').textContent()) ?? ''),
+      'no notice that tiles are missing',
+    );
+  }
+  await check(page, 'map');
 
   // the admin pages are closed to a volunteer (this page's own 403 is the point)
   const denied = await (await ctx.newPage()).goto(`${base}/admin/`);
@@ -434,6 +469,9 @@ try {
     .click();
   await doraPage.getByText(/is on your list now/).waitFor();
   await check(doraPage, 'find people (dark)');
+  await doraPage.goto(`${base}/map/`);
+  await mapDrawn(doraPage, 'map (dark)');
+  await check(doraPage, 'map (dark)');
   await doraPage.goto(`${base}/`);
   await doraPage.locator('.people > li').first().waitFor();
   await check(doraPage, 'my people (dark)');
@@ -481,7 +519,7 @@ try {
   server.close();
 }
 
-for (const [label, n] of ignored) console.log(`ignored ${n}x (WebKit quirk): ${label}`);
+for (const [label, n] of ignored) console.log(`ignored ${n}x (browser quirk): ${label}`);
 if (problems.length) {
   console.log(`PROBLEMS:\n${[...new Set(problems)].join('\n')}`);
   process.exit(1);

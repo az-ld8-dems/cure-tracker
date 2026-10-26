@@ -127,6 +127,25 @@ assert.equal(median([1, undefined, 3]), undefined, 'a missing value is not guess
   assert.deepEqual(m.failing.performance, ['unused-javascript']);
 }
 
+// --- a page with looser limits for what its purpose costs
+{
+  const heavy = measurementOf(lhr({ performance: 0.74, tbt: 1500 }));
+  assert.equal(judge('/map/ mobile', heavy).problems.length > 0, true, 'strict by default');
+  const loose = { performance: 0.5, metrics: { 'total-blocking-time': 3000 } };
+  assert.deepEqual(judge('/map/ mobile', heavy, loose).problems, [], 'inside the looser limits');
+  const worse = judge('/map/ mobile', measurementOf(lhr({ performance: 0.4, tbt: 3500 })), loose).problems;
+  assert.equal(worse.length, 2, 'past them, both complain');
+  assert.match(worse.join('\n'), /performance score 40, budget 50/);
+  // Looser means looser: a "limit" tighter than the budget changes nothing, and the other categories and metrics are as strict as ever.
+  assert.deepEqual(
+    judge('p', measurementOf(lhr({ performance: 0.88, tbt: 100 })), { performance: 0.99, metrics: { 'total-blocking-time': 10 } }).problems
+      .length,
+    1,
+  );
+  assert.equal(judge('p', measurementOf(lhr({ accessibility: 0.99 })), loose).problems.length, 1);
+  assert.equal(judge('p', measurementOf(lhr({ cls: 0.3 })), loose).problems.length, 1);
+}
+
 // --- measurePage
 // Passes first time: one run, nothing more.
 {

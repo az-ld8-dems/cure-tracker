@@ -29,6 +29,9 @@
       "migrations_dir": "db/migrations"
     }
   ],
+  // The map's tiles: one PMTiles file in this bucket, served by the Worker behind Access (worker/tiles.ts). The bucket has to exist before
+  // the next deploy, or the deploy fails: `npx wrangler r2 bucket create cure-tracker-tiles` (docs/setup.md).
+  "r2_buckets": [{ "binding": "TILES", "bucket_name": "cure-tracker-tiles" }],
   // The admins' emails are a secret, not a variable, so they are not in git and changing them needs no deploy:
   //   npx wrangler secret put ADMIN_EMAILS      (paste the emails, comma-separated; it applies right away)
   // Listed here so `wrangler types` knows about it. While it is missing nobody is an admin (docs/setup.md).

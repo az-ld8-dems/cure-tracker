@@ -5,6 +5,7 @@ import type { AccessVerifier } from './access.ts';
 import { type AccessEnv, requireAccess } from './access-gate.ts';
 import { handleApi } from './api.ts';
 import type { Db } from './db.ts';
+import { serveTiles, TILES_PATH, type TileBucket, tilesReady } from './tiles.ts';
 
 export interface AppEnv extends AccessEnv {
   // Comma-separated emails that get the admin pages: a Worker secret (wrangler secret put ADMIN_EMAILS). Missing means no admins.
@@ -12,6 +13,8 @@ export interface AppEnv extends AccessEnv {
   // "true" lets admins reset (delete every voter). Anything else turns the reset off.
   ALLOW_RESET: string;
   DB: Db;
+  // The R2 bucket that holds the map's tiles (docs/setup.md). Without it the map file answers 404 and the map draws only the pins.
+  TILES?: TileBucket;
   ASSETS: { fetch(request: Request): Promise<Response> };
 }
 
@@ -47,8 +50,10 @@ export async function handle(request: Request, env: AppEnv, deps: Deps = {}): Pr
       allowReset: env.ALLOW_RESET === 'true',
       now: deps.now ?? (() => new Date()),
       fetcher: deps.fetcher ?? fetch,
+      tilesReady: () => tilesReady(env.TILES),
     });
   }
+  if (path === TILES_PATH) return serveTiles(request, env.TILES);
   if ((path === '/admin' || path.startsWith('/admin/')) && !isAdmin) return text(403, 'Forbidden');
   return env.ASSETS.fetch(request);
 }

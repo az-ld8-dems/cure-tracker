@@ -57,6 +57,33 @@ The repository being public means everything in it is public. Nothing here is se
 
 Sign in as an admin, open **Admin**, choose the CSV of the LD8 sheet, press **Check the file**, read the counts, then **Upload this file**. See `docs/spec.md` for what the checks mean.
 
+## 7. The map's tiles (R2)
+
+The Map page draws pins from the database and a street map from one file, `ld8.pmtiles`, kept in an R2 bucket and served by the Worker behind Access. Do the first step **before the next deploy**: `wrangler.jsonc` binds the bucket, and a deploy fails while it does not exist. The page works without the file (it says the street map is not set up and draws only the pins), so steps 2 to 4 can come later.
+
+1. Create the bucket (R2 may ask you to turn it on for the account in the dashboard first; the free allowance of 10 GB stored and a million reads a month is far more than this needs):
+
+```bash
+npx wrangler r2 bucket create cure-tracker-tiles
+```
+
+2. Cut the file. Install the [`pmtiles` command-line tool](https://github.com/protomaps/go-pmtiles/releases), find the newest build's filename at https://maps.protomaps.com/builds (the daily builds keep a week), and extract the box around LD8: the Census's 2026 boundary for Arizona State Senate District 8 (`-112.0129,33.3765,-111.6399,33.5816`) plus about two miles. First ask how big it will be, with `--dry-run`:
+
+```bash
+pmtiles extract https://build.protomaps.com/YYYYMMDD.pmtiles ld8.pmtiles --bbox=-112.04,33.35,-111.61,33.61 --maxzoom=14 --dry-run
+pmtiles extract https://build.protomaps.com/YYYYMMDD.pmtiles ld8.pmtiles --bbox=-112.04,33.35,-111.61,33.61 --maxzoom=14
+```
+
+A few tens of megabytes is normal. Each zoom level roughly doubles it, so if it is large, lower `--maxzoom` (the map draws the last level larger past it, so the streets only get blurrier).
+
+3. Upload it (an R2 object may be up to about 5 GB; wrangler uploads up to 300 MiB in one go, which this is well under):
+
+```bash
+npx wrangler r2 object put cure-tracker-tiles/ld8.pmtiles --file ld8.pmtiles --content-type application/octet-stream --remote
+```
+
+4. Reload the Map page: the street map shows. Write the build date, the box and the file's size in `vendor/README.md`. To replace the file later, run step 3 again; browsers keep the old one for up to a day.
+
 ## Backups
 
 There are none on purpose. D1 Time Travel keeps 30 days of history and restores to any minute:

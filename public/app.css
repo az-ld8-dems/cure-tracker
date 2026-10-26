@@ -119,10 +119,26 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2xs) var(--space-md);
+  gap: var(--space-2xs) var(--space-sm);
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* On a phone the account menu has a row of its own, so the Admin link appearing (it is revealed once the page knows who is signed in) does
+   not push it down a row and shift the page. */
+.nav > li:last-child {
+  flex-basis: 100%;
+}
+
+@media (min-width: 40rem) {
+  .nav {
+    column-gap: var(--space-md);
+  }
+
+  .nav > li:last-child {
+    flex-basis: auto;
+  }
 }
 
 .nav a {
@@ -460,4 +476,44 @@ th[aria-sort="descending"] > .pool-sort::after {
 /* The column matching on the admin upload: fields line up at the top, whether or not one has an example line under it */
 .columns-grid {
   align-items: start;
+}
+
+/* The map page: the map, its legend, and the person picked on it. MapLibre's own controls come from /lib/maplibre-gl.css. */
+.map-frame {
+  position: relative;
+  block-size: min(70vh, 40rem);
+  min-block-size: 20rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-lg);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* The same two looks as the pins on the map: a solid dot where the geocoder found the address, a ring where the place is a guess. */
+.pin {
+  box-sizing: border-box;
+  inline-size: 1rem;
+  block-size: 1rem;
+  border: 3px solid var(--pin-exact);
+  border-radius: var(--radius-pill);
+  background: var(--pin-exact);
+}
+
+.pin--guess {
+  border-color: var(--pin-guess);
+  background: var(--surface-raised);
 }
