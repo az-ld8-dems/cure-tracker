@@ -1,6 +1,6 @@
 // The pins on the map: where the open pool is, inside a box. Free of Worker-only globals. Only erasable TypeScript syntax.
 import type { Db, Value } from './db.ts';
-import { inCountry } from './near.ts';
+import { inCountry, milesBetween, type Place } from './near.ts';
 
 export interface Box {
   west: number;
@@ -24,6 +24,8 @@ export async function pinsIn(
   db: Db,
   box: Box,
   narrow: { where: string[]; binds: Value[] } = { where: [], binds: [] },
+  // Only the pins within `miles` of `home`: the square in `narrow` is the database's part, the circle is checked here.
+  within?: { home: Place; miles: number },
 ): Promise<{ pins: Pin[]; more: boolean }> {
   const { results } = await db
     .prepare(
@@ -34,7 +36,8 @@ export async function pinsIn(
     .bind(box.south, box.north, box.west, box.east, ...narrow.binds, MAX_PINS + 1)
     .all<{ id: number; lat: number; lon: number; approximate: number }>();
   const more = results.length > MAX_PINS;
-  return { pins: results.slice(0, MAX_PINS).map((r): Pin => [r.id, r.lat, r.lon, r.approximate ? 1 : 0]), more };
+  const kept = within ? results.filter((r) => milesBetween(within.home, { lat: r.lat, lon: r.lon }) <= within.miles) : results;
+  return { pins: kept.slice(0, MAX_PINS).map((r): Pin => [r.id, r.lat, r.lon, r.approximate ? 1 : 0]), more };
 }
 
 // A box from the query string, or null when it is not a box inside the country, south of north and west of east.

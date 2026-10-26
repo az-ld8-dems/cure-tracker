@@ -304,14 +304,14 @@ function filterParam(url: URL, name: string): string {
 
 // "Within N miles" of the place the volunteer saved (the miles parameter), or null without one. A radius is what keeps a search by distance
 // cheap, so sorting by distance needs one too.
-async function nearOf(c: Ctx, url: URL): Promise<{ where: string; away: string } | null> {
+async function nearOf(c: Ctx, url: URL): Promise<{ where: string; away: string; box: string; home: Place; miles: number } | null> {
   const milesRaw = url.searchParams.get('miles') ?? '';
   if (milesRaw === '') return null;
   const miles = Number(milesRaw);
   if (!Number.isFinite(miles) || miles < 0.5 || miles > 100) throw new HttpError(400, 'miles must be from 0.5 to 100');
   const home = await homeOf(c.db, c.me.id);
   if (!home) throw new HttpError(400, 'Save your location first');
-  return nearSql(home, miles);
+  return { ...nearSql(home, miles), home, miles };
 }
 
 // The city, party, precinct and search filters the list and the map share (city and precinct ignoring case, party exactly, the search as any
@@ -432,8 +432,10 @@ async function mapPins(c: Ctx, _p: string[], _b: Body, url: URL): Promise<Respon
   // The same filters as Find people (city, precinct, party, search, and a radius around the saved place), so the map can show part of the pool.
   const narrowed = narrowBy(url, false);
   const near = await nearOf(c, url);
-  if (near) narrowed.where.push(near.where);
-  const found = await pinsIn(c.db, box, narrowed);
+  // Only the square around the place goes to the database. The exact distance of each pin in it is checked here: the database would work it out
+  // with trigonometry for every row in the square, where the list only works it out for the few rows a page shows.
+  if (near) narrowed.where.push(near.box);
+  const found = await pinsIn(c.db, box, narrowed, near ? { home: near.home, miles: near.miles } : undefined);
   return json({
     ...found,
     tiles: await c.tilesReady(),
