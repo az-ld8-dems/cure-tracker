@@ -78,7 +78,7 @@ if (me) {
     { class: 'map-legend', 'aria-label': 'Legend' },
     h('li', {}, h('span', { class: 'pin', 'aria-hidden': 'true' }), 'Address found'),
     h('li', {}, h('span', { class: 'pin pin--guess', 'aria-hidden': 'true' }), 'Place is a guess (the middle of a ZIP, or a rough match)'),
-    h('li', {}, h('span', { class: 'pin pin--claimed', 'aria-hidden': 'true' }), 'Grey, dark edge: a volunteer has them'),
+    h('li', {}, h('span', { class: 'pin pin--claimed', 'aria-hidden': 'true' }), 'Yellow, dark edge: a volunteer has them'),
     h(
       'li',
       {},
