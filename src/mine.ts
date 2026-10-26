@@ -220,7 +220,7 @@ if (me) {
       h(
         'div',
         { class: 'fl-empty fl-stack fl-stack--3', role: 'status' },
-        h('p', {}, 'You have nobody yet.'),
+        h('p', {}, 'You don’t have anybody yet.'),
         h('a', { class: 'btn btn--accent', href: '/pool/' }, 'Find people to call'),
       ),
     );

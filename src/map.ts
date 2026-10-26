@@ -72,6 +72,7 @@ if (me) {
     app,
     h('div', { class: 'fl-cluster' }, legend, refresh),
     frame,
+    detail,
     status,
     h(
       'p',
@@ -80,7 +81,6 @@ if (me) {
       h('a', { href: '/pool/' }, 'Find people'),
       ', which can also sort by how far away people are.',
     ),
-    detail,
   );
 
   const styleFor = async (t: 'light' | 'dark', tiles: boolean): Promise<Record<string, unknown>> => {
@@ -235,8 +235,9 @@ if (me) {
     try {
       const { person } = await api<PersonDetail>('GET', `/api/people/${id}`);
       renderPerson(person);
-      detail.focus();
-      detail.scrollIntoView({ block: 'nearest' });
+      // The card sits right under the map. Focus it without the browser's own scroll, and scroll only as far as it takes to show it.
+      detail.focus({ preventScroll: true });
+      detail.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
     } catch (e) {
       toast(failureText(e), 'error');
       await load(true);

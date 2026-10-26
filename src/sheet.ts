@@ -493,7 +493,8 @@ export function readSheet(text: string, saved: ColumnPick = {}, picked: ColumnPi
   const list = [...people.values()];
   if (list.length === 0) throw new ImportError('No usable rows: every row was another district or had no name or address.');
   const warnings: string[] = [];
-  if (badDates > 0) warnings.push(`${badDates} status date${badDates > 1 ? 's' : ''} could not be read and were left blank.`);
+  if (badDates > 0)
+    warnings.push(`${badDates} status date${badDates > 1 ? 's could not be read and were' : ' could not be read and was'} left blank.`);
   const noCity = list.filter((p) => p.city === '').length;
   if (noCity > 0) warnings.push(`${noCity} address${noCity > 1 ? 'es' : ''} had no city this tool recognizes, so the city is blank.`);
   // Say what is blank because the file has no such column. The middle name is not worth a warning.

@@ -121,7 +121,7 @@ try {
   await check(page, 'welcome');
   await page.getByLabel('Your name').fill('Vera Vale');
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByText('You have nobody yet.').waitFor();
+  await page.getByText('You don’t have anybody yet.').waitFor();
   await check(page, 'my people (empty)');
 
   // ---- find people, filter, claim
@@ -276,7 +276,7 @@ try {
   await admin.goto(`${base}/`);
   await admin.getByLabel('Your name').fill('Ada Admin');
   await admin.getByRole('button', { name: 'Continue' }).click();
-  await admin.getByText('You have nobody yet.').waitFor();
+  await admin.getByText('You don’t have anybody yet.').waitFor();
   await admin.getByRole('link', { name: 'Admin', exact: true }).click();
   await admin.getByRole('heading', { name: 'Upload the state’s sheet' }).waitFor();
   await admin.getByRole('heading', { name: 'Audit log' }).waitFor();
@@ -292,7 +292,7 @@ try {
     ]);
   await admin.getByLabel('CSV file').setInputFiles({ name: 'day2.csv', mimeType: 'text/csv', buffer: Buffer.from(sheetCsv(day2)) });
   await admin.getByRole('button', { name: 'Check the file' }).click();
-  await admin.getByText('Become cured').waitFor();
+  await admin.getByText('Newly cured').waitFor();
   expect(
     'admin upload',
     /^New people2/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
@@ -385,7 +385,7 @@ try {
   await admin.getByLabel('First name (needed)').selectOption('Given');
   await admin.getByLabel('Last name (needed)').selectOption('Family');
   await admin.getByRole('button', { name: 'Check the file again' }).click();
-  await admin.getByText('Become cured').waitFor();
+  await admin.getByText('Newly cured').waitFor();
   expect(
     'admin columns',
     /^New people1/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
@@ -410,7 +410,7 @@ try {
   await admin.getByText(/^New people0/).waitFor();
   expect(
     'admin matches',
-    /Become cured0/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    /Newly cured0/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
     'marked as the same person, nobody is cured',
   );
   expect(
@@ -459,7 +459,7 @@ try {
   await check(doraPage, 'welcome (dark)');
   await doraPage.getByLabel('Your name').fill('Dora Dale');
   await doraPage.getByRole('button', { name: 'Continue' }).click();
-  await doraPage.getByText('You have nobody yet.').waitFor();
+  await doraPage.getByText('You don’t have anybody yet.').waitFor();
   await doraPage.goto(`${base}/pool/`);
   await doraPage.getByText(/Showing 30 people/).waitFor();
   await doraPage

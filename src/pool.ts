@@ -1,4 +1,4 @@
-// "Find people": everyone who still needs curing and has nobody yet. Filter by city, precinct, party or how far away, sort, and claim.
+// "Find people": everyone who still needs curing and has no volunteer yet. Filter by city, precinct, party or how far away, sort, and claim.
 import type { Me, PeoplePage, Person } from './api.d.ts';
 import {
   $,
