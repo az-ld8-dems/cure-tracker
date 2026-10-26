@@ -297,4 +297,6 @@ export interface OrganizerGrant {
 export interface OrganizerList {
   grants: OrganizerGrant[];
   precincts: string[];
+  // The volunteers who are site admins: they organize everything, with or without a grant.
+  siteAdmins: number[];
 }

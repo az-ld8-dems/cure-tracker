@@ -387,17 +387,19 @@ if (me && !me.isAdmin && !me.organizes) {
   }
 
   // ---- who organizes which precincts
-  let organizerList: OrganizerList = { grants: [], precincts: [] };
+  let organizerList: OrganizerList = { grants: [], precincts: [], siteAdmins: [] };
   let editingGrant: number | null = null;
   function organizersSection(): void {
     const known = new Set(organizerList.precincts.map((p) => p.toLowerCase()));
     const grantOf = (id: number) => organizerList.grants.find((g) => g.volunteerId === id);
-    const words = (g: OrganizerGrant | undefined): string =>
-      g === undefined
-        ? 'Nothing'
-        : g.all
-          ? 'All precincts'
-          : g.precincts.map((p) => (known.has(p.toLowerCase()) ? p : `${p} (no one is in it)`)).join(', ');
+    const words = (g: OrganizerGrant | undefined, siteAdmin: boolean): string =>
+      siteAdmin
+        ? 'All precincts (site admin)'
+        : g === undefined
+          ? 'Nothing'
+          : g.all
+            ? 'All precincts'
+            : g.precincts.map((p) => (known.has(p.toLowerCase()) ? p : `${p} (no one is in it)`)).join(', ');
 
     const form = (v: Volunteer): HTMLElement => {
       const g = grantOf(v.id);
@@ -432,6 +434,13 @@ if (me && !me.isAdmin && !me.organizes) {
           },
         },
         h('h3', {}, `What ${volunteerName(v)} organizes`),
+        organizerList.siteAdmins.includes(v.id)
+          ? h(
+              'p',
+              { class: 'fl-help' },
+              `${volunteerName(v)} is a site admin, who organizes every precinct whatever is set here. Site admins are set in the Worker secret, not in this page.`,
+            )
+          : null,
         h('label', { class: 'fl-check', for: 'grant-all' }, all, 'All precincts'),
         field(
           'grant-precincts',
@@ -477,7 +486,7 @@ if (me && !me.isAdmin && !me.organizes) {
             ['Volunteer', 'Organizes', 'Change'],
             [...volunteers.values()].map((v) => [
               volunteerName(v),
-              words(grantOf(v.id)),
+              words(grantOf(v.id), organizerList.siteAdmins.includes(v.id)),
               h(
                 'button',
                 {

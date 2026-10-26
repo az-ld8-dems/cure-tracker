@@ -48,6 +48,7 @@ export async function handle(request: Request, env: AppEnv, deps: Deps = {}): Pr
       db: env.DB,
       email,
       isAdmin,
+      admins,
       allowReset: env.ALLOW_RESET === 'true',
       now: deps.now ?? (() => new Date()),
       fetcher: deps.fetcher ?? fetch,

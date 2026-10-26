@@ -51,6 +51,8 @@ export interface ApiContext {
   db: Db;
   email: string;
   isAdmin: boolean;
+  // Every site admin's email (ADMIN_EMAILS, lowercase), to say on the admin page who they are.
+  admins?: string[];
   // Whether this deployment lets admins reset (ALLOW_RESET).
   allowReset: boolean;
   now: () => Date;
@@ -63,6 +65,7 @@ interface Ctx {
   db: Db;
   me: Volunteer;
   isAdmin: boolean;
+  admins: string[];
   // What the caller may organize (move people between volunteers in): everything for a site admin, some precincts for an organizer, null for a plain volunteer.
   scope: Scope | null;
   allowReset: boolean;
@@ -949,7 +952,10 @@ async function listOrganizers(c: Ctx): Promise<Response> {
   const { results } = await c.db
     .prepare("SELECT DISTINCT precinct FROM people WHERE status != 'cured' AND precinct != '' ORDER BY precinct COLLATE NOCASE")
     .all<{ precinct: string }>();
-  const list: OrganizerList = { grants, precincts: results.map((r) => r.precinct) };
+  // Site admins organize everything whatever their grant says, so the page shows them as that and not as "Nothing".
+  const { results: vols } = await c.db.prepare('SELECT id, email FROM volunteers').all<{ id: number; email: string }>();
+  const siteAdmins = vols.filter((v) => c.admins.includes(v.email.toLowerCase())).map((v) => Number(v.id));
+  const list: OrganizerList = { grants, precincts: results.map((r) => r.precinct), siteAdmins };
   return json(list);
 }
 
@@ -1114,6 +1120,7 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
       db: api.db,
       me,
       isAdmin: api.isAdmin,
+      admins: api.admins ?? [],
       scope,
       allowReset: api.allowReset,
       now: iso,
