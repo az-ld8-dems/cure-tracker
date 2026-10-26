@@ -536,7 +536,7 @@ th[aria-sort="descending"] > .pool-sort::after {
   background: var(--surface-raised);
 }
 
-/* Claimed: a yellow dot with a dark edge (the open pool's dots have a light one); stalled is the same dot in red. */
+/* Claimed: a yellow dot with an outline in the text color (dark in light mode, light in dark mode; the open pool's dots have a plain one); stalled is the same dot in red. */
 .pin--claimed {
   border-color: var(--ink);
   background: var(--pin-claimed);

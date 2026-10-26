@@ -78,12 +78,12 @@ if (me) {
     { class: 'map-legend', 'aria-label': 'Legend' },
     h('li', {}, h('span', { class: 'pin', 'aria-hidden': 'true' }), 'Address found'),
     h('li', {}, h('span', { class: 'pin pin--guess', 'aria-hidden': 'true' }), 'Place is a guess (the middle of a ZIP, or a rough match)'),
-    h('li', {}, h('span', { class: 'pin pin--claimed', 'aria-hidden': 'true' }), 'Yellow, dark edge: a volunteer has them'),
+    h('li', {}, h('span', { class: 'pin pin--claimed', 'aria-hidden': 'true' }), 'Yellow, outlined: a volunteer has them'),
     h(
       'li',
       {},
       h('span', { class: 'pin pin--stalled', 'aria-hidden': 'true' }),
-      'Red, dark edge: a volunteer has them, and nothing has happened for days',
+      'Red, outlined: a volunteer has them, and nothing has happened for days',
     ),
     youLegend,
   );
@@ -166,7 +166,7 @@ if (me) {
       filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'who'], 0], ['==', ['get', 'approximate'], 1]],
       paint: { 'circle-color': ring, 'circle-stroke-color': guess, 'circle-stroke-width': 3, 'circle-radius': 7 },
     });
-    // A volunteer has them: yellow with a dark edge, red when nothing has happened for days.
+    // A volunteer has them: yellow with an outline in the text color, red when nothing has happened for days.
     m.addLayer({
       id: 'claimed',
       type: 'circle',
@@ -209,7 +209,7 @@ if (me) {
     };
   }
 
-  // The picked pin is bigger and has a dark edge, whichever color it is.
+  // The picked pin is bigger and has an outline in the text color, whichever color it is.
   function markPicked(m: MapLibreMap): void {
     const is: ['==', ['get', string], number] = ['==', ['get', 'id'], picked ?? -1];
     for (const [layer, edge, width] of [
