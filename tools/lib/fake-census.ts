@@ -12,7 +12,15 @@ export interface Sent {
 export function fakeCensus() {
   const sent: Sent[] = [];
   // matchEverything: a later Census release that finds the places it could not find before.
-  const behavior = { status: 200, throws: false, matchEverything: false, during: null as (() => void) | null };
+  // boundaryPoint: where a street that only matches with no city or ZIP is found (a boundary between towns, as the real Census did for
+  // 1500 W Rio Salado Pkwy: Mesa 85201 on the sheet, Tempe 85281 to the Census).
+  const behavior = {
+    status: 200,
+    throws: false,
+    matchEverything: false,
+    boundaryPoint: { lat: 33.4, lon: -112.0 },
+    during: null as (() => void) | null,
+  };
 
   const fetcher: typeof fetch = async (_url, init) => {
     if (behavior.throws) throw new TypeError('network down');
@@ -29,12 +37,21 @@ export function fakeCensus() {
       const input = `"${id}","${street}, ${city}, ${state}, ${zip}"`;
       if (!behavior.matchEverything && /NOWHERE/i.test(street)) return `${input},"No_Match"`;
       if (!behavior.matchEverything && /TIE/i.test(street)) return `"${id}","${street}, ${city}, ${state}, ${zip}","Tie"`;
+      // A street that does not match with the sheet's city or ZIP, but does with neither; FARAWAY is found in Flagstaff, which is not where
+      // the person lives.
+      const blank = city === '' && zip === '';
+      if (/BOUNDARY|FARAWAY/i.test(street)) {
+        if (!blank) return `${input},"No_Match"`;
+        const at = /FARAWAY/i.test(street) ? { lat: 35.2, lon: -111.65 } : behavior.boundaryPoint;
+        return `"${id}","${street}, ${city}, ${state}, ${zip}","Match","Exact","${street.toUpperCase()}, AZ","${at.lon},${at.lat}","1","L"`;
+      }
       // A point in the Phoenix area that depends on the street, longitude first, as the Census writes it.
       let h = 0;
       for (const ch of `${street} ${zip}`) h = (h * 31 + ch.charCodeAt(0)) % 100000;
       const lon = (-112.2 + (h % 1000) / 2500).toFixed(11);
       const lat = (33.3 + (Math.floor(h / 1000) % 100) / 400).toFixed(11);
-      return `"${id}","${street}, ${city}, ${state}, ${zip}","Match","Exact","${street.toUpperCase()}, ${city.toUpperCase()}, ${state}, ${zip}","${lon},${lat}","${100000 + h}","L"`;
+      const how = /NONEXACT/i.test(street) ? 'Non_Exact' : 'Exact';
+      return `"${id}","${street}, ${city}, ${state}, ${zip}","Match","${how}","${street.toUpperCase()}, ${city.toUpperCase()}, ${state}, ${zip}","${lon},${lat}","${100000 + h}","L"`;
     });
     return new Response(answers.join('\n'), { status: 200 });
   };

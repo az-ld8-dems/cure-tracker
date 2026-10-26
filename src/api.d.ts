@@ -125,9 +125,18 @@ export interface AdminStats {
   lastUpload: UploadRecord | null;
   // Where people live: open people not looked up yet, people placed on the map, and people the geocoder could not place. `sample` is
   // what a request to the geocoder looks like for the next few people waiting: an id and an address, nothing else.
-  // `matched` are placed where the geocoder found them; `approximate` are put at the middle of their ZIP; `unmatched` the geocoder could not
-  // place (the approximate ones among them).
-  geocode: { waiting: number; matched: number; approximate: number; unmatched: number; sample: string[] };
+  // `matched` are placed exactly; `approximate` are placed roughly (a match the Census calls non-exact, or the middle of their ZIP);
+  // `noPlace` have no place at all; `byHand` an admin placed (they count as placed exactly); `unmatched` are the people the geocoder could not
+  // place (no match or a tie), whatever they have for now.
+  geocode: {
+    waiting: number;
+    matched: number;
+    approximate: number;
+    noPlace: number;
+    byHand: number;
+    unmatched: number;
+    sample: string[];
+  };
 }
 
 // What one geocoding request did. `next` is where to go on from (the id to pass as `after`), null when no one is left.
@@ -148,6 +157,8 @@ export interface UnplacedPerson {
   address: string;
   reason: 'no_match' | 'tie';
   approximate: boolean;
+  // Set when an admin placed this person by hand: where, so it can be corrected or taken away.
+  byHand: { lat: number; lon: number } | null;
 }
 
 export interface UnplacedPage {

@@ -382,6 +382,8 @@ if (me && !me.isAdmin) {
 
   // ---- numbers and people
   // ---- where people live
+  // Whether the list of unplaced people was open, so it stays open when the page draws itself again after a change.
+  let unplacedOpen = false;
   function geocodeSection(s: AdminStats): void {
     const g = s.geocode;
     const status = h('p', { class: 'fl-help', role: 'status' });
@@ -434,6 +436,61 @@ if (me && !me.isAdmin) {
     let shown: UnplacedPage['people'] = [];
     let loaded = false;
     const WHY = { no_match: 'No match', tie: 'More than one place' } as const;
+    // "33.4295, -111.9628" as a map shows it (latitude first), or null.
+    function parsePlace(text: string): { lat: number; lon: number } | null {
+      const nums = (text.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+      const [lat, lon] = nums;
+      return nums.length === 2 && lat !== undefined && lon !== undefined && Math.abs(lat) <= 90 ? { lat, lon } : null;
+    }
+    async function placeByHand(p: UnplacedPage['people'][number], body: object, done: string): Promise<void> {
+      try {
+        await api('POST', `/api/admin/people/${p.id}/place`, body);
+        toast(done);
+        await refresh();
+      } catch (e) {
+        toast(failureText(e), 'error');
+      }
+    }
+    function placeBox(p: UnplacedPage['people'][number]): HTMLElement {
+      const input = h('input', {
+        class: 'fl-input',
+        type: 'text',
+        inputmode: 'decimal',
+        autocomplete: 'off',
+        placeholder: '33.4295, -111.9628',
+        'aria-label': `Latitude and longitude for ${p.name}`,
+        value: p.byHand ? `${p.byHand.lat}, ${p.byHand.lon}` : '',
+      });
+      return h(
+        'form',
+        {
+          class: 'fl-cluster pool-near-row',
+          onsubmit: (e: Event) => {
+            e.preventDefault();
+            const place = parsePlace(input.value);
+            if (!place) {
+              toast('Write latitude, then longitude, like 33.4295, -111.9628.', 'error');
+              return;
+            }
+            void placeByHand(p, place, `Placed ${p.name}.`);
+          },
+        },
+        input,
+        h('button', { class: 'fl-btn fl-btn--sm', type: 'submit', 'aria-label': `Set the place of ${p.name}` }, 'Set'),
+        p.byHand
+          ? h(
+              'button',
+              {
+                class: 'fl-btn fl-btn--sm',
+                type: 'button',
+                'aria-label': `Take away the place of ${p.name}`,
+                onclick: () => void placeByHand(p, { clear: true }, `Took away the place of ${p.name}.`),
+              },
+              'Clear',
+            )
+          : null,
+      );
+    }
     async function loadMore(after: number): Promise<void> {
       const page = await api<UnplacedPage>('GET', `/api/admin/geocode/unplaced?after=${after}`);
       shown = [...shown, ...page.people];
@@ -443,12 +500,13 @@ if (me && !me.isAdmin) {
           ? h('p', { class: 'fl-help' }, 'Everyone has a place.')
           : table(
               'People the geocoder could not place',
-              ['Person', 'Address', 'Why', 'For now', h('span', { class: 'fl-sr-only' }, 'Copy')],
+              ['Person', 'Address', 'Why', 'For now', 'Place by hand', h('span', { class: 'fl-sr-only' }, 'Copy')],
               shown.map((p) => [
                 p.name,
                 addressText(p.address),
                 WHY[p.reason],
-                p.approximate ? 'Middle of their ZIP' : 'No place',
+                p.byHand ? 'Placed by hand' : p.approximate ? 'Middle of their ZIP' : 'No place',
+                placeBox(p),
                 h(
                   'button',
                   {
@@ -492,14 +550,14 @@ if (me && !me.isAdmin) {
     const list = h(
       'details',
       { class: 'fl-disclosure' },
-      h('summary', {}, `Not placed exactly (${g.unmatched})`),
+      h('summary', {}, `The geocoder could not place (${g.unmatched})`),
       h(
         'div',
         { class: 'fl-stack fl-stack--3' },
         h(
           'p',
           { class: 'fl-help' },
-          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
+          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. To place one by hand, look the address up on a map and write latitude, then longitude, in the box (a right-click on Google Maps or Apple Maps gives both). Looking them up again also tries the street alone, with no city or ZIP, which finds addresses on a boundary between towns, and believes the answer only if it is within about 15 miles of the middle of their ZIP. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
         ),
         rows,
         h(
@@ -510,10 +568,16 @@ if (me && !me.isAdmin) {
       ),
     );
     list.addEventListener('toggle', () => {
+      unplacedOpen = list.open;
       if (!list.open || loaded) return;
       loaded = true;
       void loadMore(0);
     });
+    if (unplacedOpen) {
+      list.open = true;
+      loaded = true;
+      void loadMore(0);
+    }
 
     clear(
       sections.geocode,
@@ -524,7 +588,7 @@ if (me && !me.isAdmin) {
         h(
           'p',
           {},
-          `${g.matched} placed exactly, ${g.approximate} placed roughly (the middle of their ZIP), ${g.waiting} waiting, ${g.unmatched - g.approximate} with no place.`,
+          `${g.matched} placed exactly${g.byHand > 0 ? ` (${g.byHand} by hand)` : ''}, ${g.approximate} placed roughly (a close match, or the middle of their ZIP), ${g.waiting} waiting, ${g.noPlace} with no place.`,
         ),
         h(
           'p',

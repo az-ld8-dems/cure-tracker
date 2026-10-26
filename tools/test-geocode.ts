@@ -101,8 +101,8 @@ for (const request of census.sent) {
     assert.doesNotMatch(line, /555-01|Nora|Tia|Una|Lou|Nowhere|Tied|Lost/, `no name or phone in ${line}`);
   }
 }
-const apt = census.sent.flatMap((r) => r.lines).find((l) => l.includes('MAIN ST APT 4'));
-assert.ok(apt, 'a unit stays in the street line');
+const apt = census.sent.flatMap((r) => r.lines).find((l) => parseCsv(l)[0]?.[1] === '3 E MAIN ST');
+assert.ok(apt, 'the apartment is sent without its APT 4: the Census ignores a unit it understands and can fail on one it does not');
 assert.equal(parseCsv(apt ?? '')[0]?.[2], 'Phoenix', 'and the city is the sheet’s city, not part of the street');
 
 // --- what was stored
@@ -304,6 +304,182 @@ assert.equal(
   sqlite.prepare('SELECT geocode FROM people WHERE id = ?').get(Number(racer?.id))?.geocode,
   null,
   'the new address still waits to be looked up',
+);
+
+// --- the second chance: the street without its unit, a non-exact match as a guess, and the street alone when the sheet's city and ZIP disagree
+const fourth = [
+  { first: 'Bo', last: 'Boundary', address: '10 BOUNDARY RD 109 TEMPE, AZ 85281' },
+  { first: 'Far', last: 'Away', address: '20 FARAWAY ST TEMPE, AZ 85281' },
+  { first: 'Nan', last: 'Nonexact', address: '30 NONEXACT AVE MESA, AZ 85201' },
+  { first: 'Ula', last: 'Unit', address: '40 E MAIN ST 1105 TEMPE, AZ 85281' },
+];
+await uploadCsv(
+  sendAs(admin),
+  sheetCsv([
+    ...moved,
+    { first: 'Wes', last: 'Wells', address: '9 W ELM ST TEMPE, AZ 85281' },
+    { first: 'Zed', last: 'Zane', address: '10 W ELM ST TEMPE, AZ 85281' },
+    ...fourth,
+  ]),
+  { filename: 'day4.csv' },
+);
+const sentBefore4 = census.sent.length;
+await run();
+const firstLines = census.sent.slice(sentBefore4).flatMap((r) => r.lines);
+const lineOf = (lines: string[], needle: string) => lines.find((l) => l.includes(needle)) ?? assert.fail(`no line with ${needle}`);
+assert.equal(parseCsv(lineOf(firstLines, '"40 E MAIN'))[0]?.[1], '40 E MAIN ST', 'a unit written as a bare number is not sent');
+assert.equal(parseCsv(lineOf(firstLines, 'BOUNDARY'))[0]?.[1], '10 BOUNDARY RD', 'nor a unit after the street type, whatever it is');
+assert.ok(!firstLines.some((l) => /b",/.test(l.split(',')[0] ?? '') || /^\d+b,/.test(l)), 'a first lookup sends one line a person');
+assert.deepEqual(
+  [
+    placeOf('Ula')?.geocode,
+    placeOf('Ula')?.approximate,
+    placeOf('Nan')?.geocode,
+    placeOf('Nan')?.approximate,
+    placeOf('Bo')?.geocode,
+    placeOf('Far')?.geocode,
+  ],
+  ['match', 0, 'match', 1, 'no_match', 'no_match'],
+  'an exact match is exact, a non-exact one is a guess, and a street that only fits without the sheet’s city and ZIP is not found yet',
+);
+const guessed = await stats();
+assert.ok(guessed.geocode.approximate >= 3, 'the non-exact match counts as placed roughly, with the two at the middle of their ZIP');
+assert.equal(
+  Number(sqlite.prepare("SELECT COUNT(*) AS n FROM people WHERE first_name = 'Nan' AND geocode = 'match' AND approximate = 1").get()?.n),
+  1,
+);
+const middle85281 = sqlite
+  .prepare("SELECT AVG(lat) AS lat, AVG(lon) AS lon FROM people WHERE zip = '85281' AND geocode = 'match' AND approximate = 0")
+  .get();
+census.behavior.boundaryPoint = { lat: Number(middle85281?.lat) + 0.02, lon: Number(middle85281?.lon) };
+const unplacedBefore = Number(
+  sqlite.prepare("SELECT COUNT(*) AS n FROM people WHERE status != 'cured' AND geocode IN ('no_match', 'tie')").get()?.n,
+);
+const sentBefore5 = census.sent.length;
+const twice = await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });
+assert.equal(twice.status, 200);
+const retryLines = census.sent.slice(sentBefore5).flatMap((r) => r.lines);
+assert.equal(
+  retryLines.length,
+  unplacedBefore * 2,
+  'a retry sends each unplaced person twice: with the sheet’s city and ZIP, and the street alone',
+);
+assert.equal(
+  lineOf(retryLines, 'BOUNDARY RD",""').split(',').slice(1).join(','),
+  '"10 BOUNDARY RD","",AZ,""',
+  'the street alone: no city, no ZIP',
+);
+assert.match(lineOf(retryLines, 'BOUNDARY RD",""'), /^\d+b,/, 'with the person’s id and a b');
+const rescuedBo = placeOf('Bo');
+assert.deepEqual([rescuedBo?.geocode, rescuedBo?.approximate], ['match', 0], 'found by the street alone, near their ZIP: placed');
+assert.ok(Math.abs(Number(rescuedBo?.lat) - (Number(middle85281?.lat) + 0.02)) < 1e-9, 'where the Census put it');
+assert.deepEqual(
+  [placeOf('Far')?.geocode, placeOf('Far')?.approximate],
+  ['no_match', 1],
+  'found in another town: not believed, so still only the middle of its ZIP',
+);
+assert.notEqual(placeOf('Far')?.lat, 35.2);
+// With no middle for the ZIP to check against, a street found alone is not believed either.
+sqlite.prepare("UPDATE people SET zip = '85999' WHERE first_name = 'Bo'").run();
+sqlite.prepare("UPDATE people SET geocode = 'no_match', lat = NULL, lon = NULL, approximate = 0 WHERE first_name = 'Bo'").run();
+await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });
+assert.equal(placeOf('Bo')?.geocode, 'no_match', 'a ZIP with fewer than five placed people has no middle to check against');
+
+// --- an admin places someone by hand
+const idOf = (first: string) => Number(sqlite.prepare('SELECT id FROM people WHERE first_name = ?').get(first)?.id);
+const nora2 = idOf('Nora');
+const putPlace = (as: string, id: number, body: unknown) => call(as, 'POST', `/api/admin/people/${id}/place`, body);
+assert.equal((await putPlace(vera, nora2, { lat: 33.43, lon: -111.96 })).status, 403, 'only admins');
+assert.equal((await putPlace(admin, 999999, { lat: 33.43, lon: -111.96 })).status, 404);
+for (const bad of [
+  {},
+  { lat: 'x', lon: 1 },
+  { lat: 33.4 },
+  { lon: -111.9 },
+  { lat: 60, lon: -112 },
+  { lat: 33.4, lon: 112 },
+  { lat: 33.4, lon: Number.NaN },
+  { clear: 'yes' },
+])
+  assert.equal((await putPlace(admin, nora2, bad)).status, 400, JSON.stringify(bad));
+assert.equal((await putPlace(admin, idOf('Cy'), { lat: 33.43, lon: -111.96 })).status, 409, 'a cured person is not placed');
+assert.equal(placeOf('Nora')?.geocode, 'no_match');
+const beforeHand = (await stats()).geocode;
+const noraWas = placeOf('Nora');
+const placed = await putPlace(admin, nora2, { lat: 33.4295123456, lon: -111.9628987654 });
+assert.equal(placed.status, 200);
+const noraNow = sqlite.prepare('SELECT lat, lon, geocode, approximate, placed_by FROM people WHERE id = ?').get(nora2);
+assert.deepEqual(
+  [noraNow?.lat, noraNow?.lon, noraNow?.geocode, noraNow?.approximate, noraNow?.placed_by],
+  [33.429512, -111.962899, 'no_match', 0, admin],
+  "rounded to a metre, exact, and the geocoder's verdict stands",
+);
+const afterHand = (await stats()).geocode;
+assert.equal(afterHand.byHand, beforeHand.byHand + 1);
+assert.equal(afterHand.matched, beforeHand.matched + 1, 'a hand-placed person counts as placed exactly');
+assert.equal(afterHand.approximate, beforeHand.approximate - Number(noraWas?.approximate), 'and no longer as a guess');
+assert.equal(afterHand.unmatched, beforeHand.unmatched, 'but the geocoder still could not place them: they stay in the list');
+const listed = ((await call(admin, 'GET', '/api/admin/geocode/unplaced')).data as UnplacedPage).people.find((p) => p.id === nora2);
+assert.deepEqual(listed?.byHand, { lat: 33.429512, lon: -111.962899 }, 'the list says where, to correct it');
+const handLog = sqlite.prepare("SELECT detail, person_id FROM audit WHERE action = 'person.place' ORDER BY id DESC LIMIT 1").get();
+assert.equal(Number(handLog?.person_id), nora2);
+assert.doesNotMatch(String(handLog?.detail), /33\.4|111\.9/, 'the log says who and which person, not where');
+// the geocoder missing again does not take it away
+const missAgain = await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });
+assert.equal(missAgain.status, 200);
+assert.deepEqual(
+  [placeOf('Nora')?.lat, sqlite.prepare('SELECT placed_by FROM people WHERE id = ?').get(nora2)?.placed_by],
+  [33.429512, admin],
+  'a miss keeps the place an admin gave',
+);
+// ...but finding the person does: the geocoder's answer is better than a guess made by hand
+census.behavior.matchEverything = true;
+await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });
+census.behavior.matchEverything = false;
+const found2 = sqlite.prepare('SELECT lat, geocode, approximate, placed_by FROM people WHERE id = ?').get(nora2);
+assert.deepEqual(
+  [found2?.geocode, found2?.approximate, found2?.placed_by],
+  ['match', 0, null],
+  'the geocoder found them: no longer by hand',
+);
+assert.notEqual(found2?.lat, 33.429512);
+// taking a hand-placed place away
+sqlite.prepare("UPDATE people SET geocode = 'no_match' WHERE id = ?").run(nora2);
+await putPlace(admin, nora2, { lat: 33.43, lon: -111.96 });
+const cleared = await putPlace(admin, nora2, { clear: true });
+assert.equal(cleared.status, 200);
+assert.deepEqual(
+  Object.values(sqlite.prepare('SELECT lat, lon, approximate, placed_by FROM people WHERE id = ?').get(nora2) ?? {}),
+  [null, null, 0, null],
+  'no place, and not by hand',
+);
+assert.equal(sqlite.prepare('SELECT geocode FROM people WHERE id = ?').get(nora2)?.geocode, 'no_match', "the geocoder's verdict stands");
+assert.equal(Number(sqlite.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'person.unplace'").get()?.n), 1);
+// clearing someone who was not placed by hand changes nothing
+const tia2 = idOf('Tia');
+const tiaWas = sqlite.prepare('SELECT lat, approximate FROM people WHERE id = ?').get(tia2);
+await putPlace(admin, tia2, { clear: true });
+assert.deepEqual(
+  sqlite.prepare('SELECT lat, approximate FROM people WHERE id = ?').get(tia2),
+  tiaWas,
+  'only a place set by hand can be taken away',
+);
+// an upload that changes the address takes a hand-set place away with it
+await putPlace(admin, nora2, { lat: 33.43, lon: -111.96 });
+await uploadCsv(
+  sendAs(admin),
+  sheetCsv([
+    ...moved.map((p) => (p.first === 'Nora' ? { ...p, address: '1 NOWHERE LN TEMPE, AZ 85283' } : p)),
+    { first: 'Wes', last: 'Wells', address: '9 W ELM ST TEMPE, AZ 85281' },
+    { first: 'Zed', last: 'Zane', address: '10 W ELM ST TEMPE, AZ 85281' },
+    ...fourth,
+  ]),
+  { filename: 'day5.csv' },
+);
+assert.deepEqual(
+  Object.values(sqlite.prepare('SELECT lat, geocode, placed_by FROM people WHERE id = ?').get(nora2) ?? {}),
+  [null, null, null],
+  'a new address starts over',
 );
 
 // --- the answers as the real Census writes them, including a row with no match, which has only three fields

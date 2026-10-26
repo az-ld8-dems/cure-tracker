@@ -23,7 +23,7 @@ import type {
 import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
-import { censusLine, GeocodeError, geocodeChunk, unplacedPeople, waitingForGeocode } from './geocode.ts';
+import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { homeOf, inCountry, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import {
   finishStage,
@@ -510,8 +510,10 @@ async function adminStats(c: Ctx): Promise<Response> {
          COALESCE(SUM(status = 'contacted'), 0) AS contacted, COALESCE(SUM(status = 'cured'), 0) AS cured,
          COALESCE(SUM(status != 'cured' AND assigned_to IS NULL), 0) AS unassigned,
          COALESCE(SUM(status != 'cured' AND flag IS NOT NULL), 0) AS flagged,
-         COALESCE(SUM(status != 'cured' AND geocode IS NULL), 0) AS waiting, COALESCE(SUM(geocode = 'match'), 0) AS located,
+         COALESCE(SUM(status != 'cured' AND geocode IS NULL), 0) AS waiting, COALESCE(SUM(status != 'cured' AND lat IS NOT NULL AND approximate = 0), 0) AS located,
+         COALESCE(SUM(status != 'cured' AND placed_by IS NOT NULL), 0) AS by_hand,
          COALESCE(SUM(status != 'cured' AND approximate = 1), 0) AS roughly,
+         COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie') AND lat IS NULL), 0) AS nowhere,
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated
        FROM people`,
     )
@@ -525,6 +527,8 @@ async function adminStats(c: Ctx): Promise<Response> {
       waiting: number;
       located: number;
       roughly: number;
+      by_hand: number;
+      nowhere: number;
       unlocated: number;
     }>();
   const sample = (await waitingForGeocode(c.db, 0, 3)).map(censusLine);
@@ -589,6 +593,8 @@ async function adminStats(c: Ctx): Promise<Response> {
       waiting: totals?.waiting ?? 0,
       matched: totals?.located ?? 0,
       approximate: totals?.roughly ?? 0,
+      noPlace: totals?.nowhere ?? 0,
+      byHand: totals?.by_hand ?? 0,
       unmatched: totals?.unlocated ?? 0,
       sample,
     },
@@ -801,6 +807,24 @@ async function uploadFinish(c: Ctx, _p: string[], body: Body): Promise<Response>
   }
 }
 
+// Places a person at coordinates an admin looked up, or ({ clear: true }) takes a hand-placed person's place away.
+async function placePerson(c: Ctx, p: string[], body: Body): Promise<Response> {
+  const id = idOf(p[0]);
+  const row = await personRow(c, id);
+  if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
+  if (body.clear === true) {
+    await placeByHand(c.db, c.me.email, c.now, id, null);
+    return json(toPerson(await personRow(c, id), c.today));
+  }
+  const { lat, lon } = body;
+  if (typeof lat !== 'number' || typeof lon !== 'number') throw new HttpError(400, 'Send lat and lon (numbers), or clear: true');
+  // To about a metre: a map gives more than anyone can use.
+  const place = { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6 };
+  if (!inCountry(place)) throw new HttpError(400, 'That place is outside the United States');
+  await placeByHand(c.db, c.me.email, c.now, id, place);
+  return json(toPerson(await personRow(c, id), c.today));
+}
+
 async function assign(c: Ctx, p: string[], body: Body): Promise<Response> {
   const id = idOf(p[0]);
   const to = body.volunteerId;
@@ -922,6 +946,7 @@ const routes: Route[] = [
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/plan$/, admin: true, handler: uploadPlan },
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/finish$/, admin: true, handler: uploadFinish },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, admin: true, handler: assign },
+  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/place$/, admin: true, handler: placePerson },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/dismiss-flag$/, admin: true, handler: dismissFlag },
   { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/reassign$/, admin: true, handler: reassignAll },
 ];

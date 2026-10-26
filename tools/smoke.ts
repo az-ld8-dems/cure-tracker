@@ -255,17 +255,44 @@ try {
   // see her in a list, copy her address, download the list, and ask again.
   await admin.getByRole('heading', { name: 'Where people live' }).waitFor();
   await admin.getByRole('button', { name: /^Look up \d+ addresses$/ }).click();
-  await admin.getByText(/^\d+ placed exactly, 1 placed roughly \(the middle of their ZIP\), 0 waiting, 0 with no place\./).waitFor();
+  await admin
+    .getByText(/^\d+ placed exactly, 1 placed roughly \(a close match, or the middle of their ZIP\), 0 waiting, 0 with no place\./)
+    .waitFor();
   expect(
     'admin geocode',
     await admin.getByRole('button', { name: 'Nobody is waiting' }).isDisabled(),
     'with nobody waiting the button is off',
   );
-  await admin.getByText('Not placed exactly (1)').click();
-  const unplacedRow = admin.getByRole('row', { name: /Nora Nowhere/ });
+  await admin.getByText('The geocoder could not place (1)').click();
+  const unplacedTable = admin.getByRole('region', { name: 'People the geocoder could not place' });
+  const unplacedRow = unplacedTable.getByRole('row', { name: /Nora Nowhere/ });
   await unplacedRow.waitFor();
   expect('admin geocode', /Middle of their ZIP/.test((await unplacedRow.textContent()) ?? ''), 'the list should say what she has for now');
   await check(admin, 'admin geocode');
+  // Place her by hand: the list stays open, she is counted as placed exactly, and an admin can take it away again.
+  await unplacedRow.getByLabel('Latitude and longitude for Nora Nowhere').fill('33.43, -111.96');
+  await unplacedRow.getByRole('button', { name: 'Set the place of Nora Nowhere' }).click();
+  await admin.getByText('Placed Nora Nowhere.').waitFor();
+  await admin.getByText(/placed exactly \(1 by hand\)/).waitFor();
+  const handRow = unplacedTable.getByRole('row', { name: /Nora Nowhere/ });
+  await handRow.waitFor();
+  expect('admin geocode', /Placed by hand/.test((await handRow.textContent()) ?? ''), 'the list should say she was placed by hand');
+  expect(
+    'admin geocode',
+    (await handRow.getByLabel('Latitude and longitude for Nora Nowhere').inputValue()) === '33.43, -111.96',
+    'and show where',
+  );
+  await check(admin, 'admin placed by hand');
+  await handRow.getByLabel('Latitude and longitude for Nora Nowhere').fill('somewhere near Tempe');
+  await handRow.getByRole('button', { name: 'Set the place of Nora Nowhere' }).click();
+  await admin.getByText(/Write latitude, then longitude/).waitFor();
+  await handRow.getByRole('button', { name: 'Take away the place of Nora Nowhere' }).click();
+  await admin.getByText('Took away the place of Nora Nowhere.').waitFor();
+  expect(
+    'admin geocode',
+    /No place/.test((await unplacedTable.getByRole('row', { name: /Nora Nowhere/ }).textContent()) ?? ''),
+    'taken away, she has no place',
+  );
   const [download] = await Promise.all([
     admin.waitForEvent('download'),
     admin.getByRole('button', { name: 'Download the list as a CSV' }).click(),

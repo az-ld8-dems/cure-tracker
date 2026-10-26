@@ -2,8 +2,9 @@
 // stores the coordinates it answers with. Run by an admin from the admin page, a couple of hundred people a request, because a free
 // Worker has about 10 ms of CPU a request and no limit on how long it waits for an answer. Only erasable TypeScript syntax.
 import type { GeocodeProgress, UnplacedPage } from '../src/api.d.ts';
-import { parseCsv, streetLine } from '../src/sheet.ts';
+import { parseCsv, streetForGeocoder } from '../src/sheet.ts';
 import type { Db } from './db.ts';
+import { milesBetween, type Place } from './near.ts';
 
 // People looked up in one request. The Census takes up to 10,000 in a batch; this many keeps the Worker's own work (writing the request
 // and reading the answer) small, and a failed request costs little.
@@ -11,6 +12,9 @@ export const GEOCODE_CHUNK = 200;
 // A ZIP needs this many people the geocoder placed before its middle stands in for someone it could not: fewer, and the middle could be one
 // person's house.
 export const ZIP_PLACE_MIN = 5;
+// An answer found by the street alone (no city or ZIP) is believed only if it is this near the middle of the person's ZIP: the Census may
+// find the same street and number in another town.
+export const ALONE_MAX_MILES = 15;
 export const CENSUS_URL = 'https://geocoding.geo.census.gov/geocoder/locations/addressbatch';
 // The Census's current benchmark: the address ranges as of the latest release.
 const BENCHMARK = 'Public_AR_Current';
@@ -28,9 +32,14 @@ interface Waiting {
 
 const quoted = (s: string): string => `"${s.replaceAll('"', '""')}"`;
 
-// The line the Census reads for one person: an id and an address (street, city, state, ZIP). No name, phone or anything else.
+// The line the Census reads for one person: an id and an address (street without its unit, city, state, ZIP). No name, phone or anything
+// else.
 export const censusLine = (p: Waiting): string =>
-  [String(p.id), quoted(streetLine(p.address, p.city)), quoted(p.city), 'AZ', quoted(p.zip)].join(',');
+  [String(p.id), quoted(streetForGeocoder(p.address, p.city)), quoted(p.city), 'AZ', quoted(p.zip)].join(',');
+
+// The second try, for someone the first missed: the street alone. When the sheet's city or ZIP is not where the Census puts a street (a
+// boundary between towns, a mailing city that is not the jurisdiction), the same street can match with neither. Its id is the person's with a b.
+const aloneLine = (p: Waiting): string => [`${p.id}b`, quoted(streetForGeocoder(p.address, p.city)), '""', 'AZ', '""'].join(',');
 
 // Who is still waiting: open people with no answer yet, after `after`, in id order. With `retry`, also those the geocoder could not place
 // last time (a tie or a miss can come out differently after the Census updates its data).
@@ -64,6 +73,28 @@ interface Answer {
   geocode: 'match' | 'no_match' | 'tie';
   lat: number | null;
   lon: number | null;
+  // 1 for a match the Census calls non-exact (the street found, the number or side of the street guessed).
+  approximate: 0 | 1;
+}
+
+// What the Census said about one line of a request.
+interface Said {
+  kind: 'match' | 'no_match' | 'tie';
+  place: Place | null;
+  exact: boolean;
+}
+
+// The middle of each of these ZIPs (the people the geocoder placed exactly there, when there are enough).
+async function zipMiddles(db: Db, zips: string[]): Promise<Map<string, Place>> {
+  if (zips.length === 0) return new Map();
+  const { results } = await db
+    .prepare(
+      `SELECT zip, AVG(lat) AS lat, AVG(lon) AS lon FROM people
+       WHERE geocode = 'match' AND approximate = 0 AND zip IN (SELECT value FROM json_each(?1)) GROUP BY zip HAVING COUNT(*) >= ?2`,
+    )
+    .bind(JSON.stringify(zips), ZIP_PLACE_MIN)
+    .all<{ zip: string; lat: number; lon: number }>();
+  return new Map(results.map((r) => [r.zip, { lat: r.lat, lon: r.lon }]));
 }
 
 // "x,y" as the Census writes a point (longitude first), or null when it is not a place on Earth.
@@ -93,7 +124,9 @@ export async function geocodeChunk(
   }
 
   const form = new FormData();
-  form.append('addressFile', new Blob([people.map(censusLine).join('\n')], { type: 'text/csv' }), 'addresses.csv');
+  // A retry also tries each person's street alone, as a second line with the id plus a b.
+  const lines = people.flatMap((p) => (retry ? [censusLine(p), aloneLine(p)] : [censusLine(p)]));
+  form.append('addressFile', new Blob([lines.join('\n')], { type: 'text/csv' }), 'addresses.csv');
   form.append('benchmark', BENCHMARK);
   let text: string;
   try {
@@ -107,20 +140,41 @@ export async function geocodeChunk(
 
   // "id","input address","Match"|"No_Match"|"Tie","Exact"|"Non_Exact","matched address","x,y","tiger line id","side"; a row with no match has only
   // the first three fields.
+  const said = new Map<string, Said>();
+  for (const row of parseCsv(text)) {
+    const kind = (row[2] ?? '').trim().toLowerCase();
+    if (kind !== 'match' && kind !== 'no_match' && kind !== 'tie') continue;
+    const place = kind === 'match' ? pointOf(row[5]) : null;
+    said.set(row[0] ?? '', {
+      kind: kind === 'match' && !place ? 'no_match' : kind,
+      place,
+      exact: (row[3] ?? '').trim().toLowerCase() === 'exact',
+    });
+  }
+  // Someone the first line did not place but the street alone did needs checking: is it near their ZIP?
+  const rescued = people.filter((p) => said.get(String(p.id))?.kind !== 'match' && said.get(`${p.id}b`)?.kind === 'match');
+  const middles = await zipMiddles(db, [...new Set(rescued.map((p) => p.zip).filter((z) => z !== ''))]);
   const asked = new Map(people.map((p) => [p.id, p]));
   const answers: Answer[] = [];
-  for (const row of parseCsv(text)) {
-    const person = asked.get(Number(row[0]));
-    if (!person) continue;
-    const kind = (row[2] ?? '').trim().toLowerCase();
-    const point = kind === 'match' ? pointOf(row[5]) : null;
-    if (kind !== 'match' && kind !== 'no_match' && kind !== 'tie') continue;
+  for (const person of people) {
+    const first = said.get(String(person.id));
+    const alone = said.get(`${person.id}b`);
+    const middle = middles.get(person.zip);
+    const useAlone =
+      first?.kind !== 'match' &&
+      alone?.kind === 'match' &&
+      alone.place !== null &&
+      middle !== undefined &&
+      milesBetween(middle, alone.place) <= ALONE_MAX_MILES;
+    const chosen = first?.kind === 'match' ? first : useAlone ? alone : first;
+    if (!chosen) continue;
     answers.push({
       id: person.id,
       address: person.address,
-      geocode: point ? 'match' : kind === 'tie' ? 'tie' : 'no_match',
-      lat: point?.lat ?? null,
-      lon: point?.lon ?? null,
+      geocode: chosen.kind,
+      lat: chosen.place?.lat ?? null,
+      lon: chosen.place?.lon ?? null,
+      approximate: chosen.kind === 'match' && !chosen.exact ? 1 : 0,
     });
     asked.delete(person.id);
   }
@@ -133,10 +187,12 @@ export async function geocodeChunk(
     db
       .prepare(
         `WITH j AS (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.address') AS address, json_extract(value, '$.geocode') AS geocode,
-           json_extract(value, '$.lat') AS lat, json_extract(value, '$.lon') AS lon FROM json_each(?1))
+           json_extract(value, '$.lat') AS lat, json_extract(value, '$.lon') AS lon,
+           json_extract(value, '$.approximate') AS approximate FROM json_each(?1))
          UPDATE people SET
            lat = CASE WHEN j.geocode = 'match' THEN j.lat ELSE people.lat END, lon = CASE WHEN j.geocode = 'match' THEN j.lon ELSE people.lon END,
-           approximate = CASE WHEN j.geocode = 'match' THEN 0 ELSE people.approximate END, geocode = j.geocode, geocoded_at = ?2
+           approximate = CASE WHEN j.geocode = 'match' THEN j.approximate ELSE people.approximate END,
+           placed_by = CASE WHEN j.geocode = 'match' THEN NULL ELSE people.placed_by END, geocode = j.geocode, geocoded_at = ?2
          FROM j WHERE people.id = j.id AND people.address = j.address`,
       )
       .bind(JSON.stringify(answers), now),
@@ -169,6 +225,9 @@ interface UnplacedRow {
   address: string;
   geocode: 'no_match' | 'tie';
   approximate: number;
+  placed_by: string | null;
+  lat: number | null;
+  lon: number | null;
 }
 
 // Open people the geocoder could not place, 50 at a time after `after`, for an admin to look up by hand. `approximate` says they have the
@@ -176,7 +235,7 @@ interface UnplacedRow {
 export async function unplacedPeople(db: Db, after: number): Promise<UnplacedPage> {
   const { results } = await db
     .prepare(
-      `SELECT id, first_name, last_name, address, geocode, approximate FROM people
+      `SELECT id, first_name, last_name, address, geocode, approximate, placed_by, lat, lon FROM people
        WHERE id > ?1 AND status != 'cured' AND geocode IN ('no_match', 'tie') ORDER BY id LIMIT ?2`,
     )
     .bind(after, UNPLACED_PAGE + 1)
@@ -189,7 +248,30 @@ export async function unplacedPeople(db: Db, after: number): Promise<UnplacedPag
       address: r.address,
       reason: r.geocode,
       approximate: r.approximate === 1,
+      byHand: r.placed_by !== null && r.lat !== null && r.lon !== null ? { lat: r.lat, lon: r.lon } : null,
     })),
     next: results.length > UNPLACED_PAGE ? (page.at(-1)?.id ?? null) : null,
   };
+}
+
+// What an admin does to a person's place by hand.
+export type HandPlace = { lat: number; lon: number } | null;
+
+// Puts a person at a place an admin looked up (or, with null, takes a hand-placed person's place away). The geocoder's own verdict stays as it
+// was; the place counts as exact, and is the admin's until the geocoder finds the person or an upload changes their address.
+export async function placeByHand(db: Db, actor: string, now: string, id: number, place: HandPlace): Promise<void> {
+  await db.batch([
+    place
+      ? db
+          .prepare('UPDATE people SET lat = ?1, lon = ?2, approximate = 0, placed_by = ?3, geocoded_at = ?4, updated_at = ?4 WHERE id = ?5')
+          .bind(place.lat, place.lon, actor, now, id)
+      : db
+          .prepare(
+            'UPDATE people SET lat = NULL, lon = NULL, approximate = 0, placed_by = NULL, updated_at = ?1 WHERE id = ?2 AND placed_by IS NOT NULL',
+          )
+          .bind(now, id),
+    db
+      .prepare('INSERT INTO audit (at, actor, action, person_id, detail) VALUES (?, ?, ?, ?, ?)')
+      .bind(now, actor, place ? 'person.place' : 'person.unplace', id, '{}'),
+  ]);
 }

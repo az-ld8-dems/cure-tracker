@@ -12,6 +12,8 @@ import {
   readSheet,
   resolveColumns,
   splitAddress,
+  streetForGeocoder,
+  streetWithoutUnit,
 } from '../src/sheet.ts';
 import { type ExistingPerson, planUpload } from './lib/plan.ts';
 import { sheetCsv } from './lib/sheet.ts';
@@ -93,6 +95,28 @@ assert.deepEqual(splitAddress('5 N RD PARADISE VALLEY, AZ 85253'), { city: 'Para
 assert.deepEqual(splitAddress('7 W RD SUN CITY WEST, AZ 85375'), { city: 'Sun City West', zip: '85375' }, 'the longest city wins');
 assert.deepEqual(splitAddress('9 W ELM ST NOWHEREVILLE, AZ 85000'), { city: '', zip: '85000' }, 'an unknown city stays blank');
 assert.deepEqual(splitAddress('no state or zip'), { city: '', zip: '' });
+
+// --- the street a geocoder is sent: the unit goes, the street stays
+const geo = (address: string, city = '') => streetForGeocoder(address, city);
+assert.equal(geo('1535 N Scottsdale Rd 1105 Tempe, AZ 85288', 'Tempe'), '1535 N Scottsdale Rd', 'a unit written as a bare number');
+assert.equal(geo('1500 W Rio Salado Pkwy 109 Mesa, AZ 85201', 'Mesa'), '1500 W Rio Salado Pkwy');
+assert.equal(geo('1 E Main St APT 2129 Tempe, AZ 85281', 'Tempe'), '1 E Main St', 'APT and its number');
+assert.equal(geo('1 E Main St UNIT B Tempe, AZ 85281', 'Tempe'), '1 E Main St');
+assert.equal(geo('1 E Main St # 4 Tempe, AZ 85281', 'Tempe'), '1 E Main St');
+assert.equal(geo('1 E Main St #4 Tempe, AZ 85281', 'Tempe'), '1 E Main St');
+assert.equal(geo('1 E Main St STE 100 Tempe, AZ 85281', 'Tempe'), '1 E Main St');
+assert.equal(geo('1 E Main St BLDG 3 APT 12 Tempe, AZ 85281', 'Tempe'), '1 E Main St', 'two unit words');
+assert.equal(geo('1600 W La Jolla Dr 1064 Tempe, AZ 85282', 'Tempe'), '1600 W La Jolla Dr');
+assert.equal(geo('1 E Main St 12B Tempe, AZ 85281', 'Tempe'), '1 E Main St', 'a number and a letter');
+assert.equal(geo('1 E Main St 4-C Tempe, AZ 85281', 'Tempe'), '1 E Main St');
+assert.equal(geo('1 Main St NW 12 Washington, DC 20001', 'Washington'), '1 Main St NW', 'a direction after the type stays');
+assert.equal(geo('1 E Main St Tempe, AZ 85281', 'Tempe'), '1 E Main St', 'nothing to remove');
+assert.equal(geo('10 N HWY 87 Payson, AZ 85541', 'Payson'), '10 N HWY 87', 'a number that is part of the name stays');
+assert.equal(geo('5 ST JOHN 4 Tempe, AZ 85281', 'Tempe'), '5 ST JOHN 4', 'no street type to go by, and JOHN is not a unit');
+assert.equal(geo('5 Via Linda 12 Tempe, AZ 85281', 'Tempe'), '5 Via Linda 12', 'no street type to go by: left alone');
+assert.equal(geo('1 E Main St Frontage Rd 4 Tempe, AZ 85281', 'Tempe'), '1 E Main St Frontage Rd');
+assert.equal(geo('PO BOX 12 Mesa, AZ 85201', 'Mesa'), 'PO BOX 12', 'a box is not a unit');
+assert.equal(streetWithoutUnit(''), '');
 
 // --- dates
 assert.equal(parseSheetDate('2026-10-21'), '2026-10-21');
