@@ -182,8 +182,20 @@ function mayChange(c: Ctx, p: PersonRow): void {
 
 // ---- routes: everyone signed in
 
+// A volunteer is "seen" at most this often. Every page asks who is signed in, and a write on each page load is a row written for nothing, and a
+// page that cannot load when the database refuses writes (the free plan's daily limit).
+const SEEN_EVERY_MS = 5 * 60_000;
+
 async function getMe(c: Ctx): Promise<Response> {
-  await c.db.prepare('UPDATE volunteers SET last_seen_at = ? WHERE id = ?').bind(c.now, c.me.id).run();
+  try {
+    await c.db
+      .prepare('UPDATE volunteers SET last_seen_at = ?1 WHERE id = ?2 AND last_seen_at < ?3')
+      .bind(c.now, c.me.id, new Date(Date.parse(c.now) - SEEN_EVERY_MS).toISOString())
+      .run();
+  } catch (e) {
+    // Being seen is not worth a page that does not load.
+    console.warn('could not record last_seen_at', e);
+  }
   const me: Me = { ...c.me, isAdmin: c.isAdmin };
   return json(me);
 }
