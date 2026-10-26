@@ -51,7 +51,11 @@ jobs:
       - run: npm ci
       # GitHub's runners point apt at the Azure mirror, which has been slow for days; the main Ubuntu archive is not.
       - name: Use archive.ubuntu.com for apt
-        run: sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/sources.list /etc/apt/sources.list.d/* || true
+        run: |
+          # The runner's sources can point at a list of mirrors (mirror+file:/etc/apt/apt-mirrors.txt) and not name one, so that file is rewritten too.
+          sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/sources.list /etc/apt/sources.list.d/* /etc/apt/apt-mirrors.txt || true
+          # What apt will use now, for the log.
+          grep -rhE '^(URIs|deb)|archive\.ubuntu|azure' /etc/apt/sources.list /etc/apt/sources.list.d /etc/apt/apt-mirrors.txt 2>/dev/null || true
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - run: npm run smoke
         env:
