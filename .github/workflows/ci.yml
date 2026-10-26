@@ -49,6 +49,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # GitHub's runners point apt at the Azure mirror, which has been slow for days; the main Ubuntu archive is not.
+      - name: Use archive.ubuntu.com for apt
+        run: sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/sources.list /etc/apt/sources.list.d/* || true
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - run: npm run smoke
         env:
