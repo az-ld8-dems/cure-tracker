@@ -10,31 +10,57 @@ export interface Box {
 }
 
 // One pin is [id, latitude, longitude, 1 when the place is a guess (the middle of a ZIP, or a match the Census calls non-exact) and 0
-// when it is exact (or set by hand)].
-export type Pin = [number, number, number, 0 | 1];
+// when it is exact (or set by hand), and who has the person: OPEN (nobody), CLAIMED (a volunteer has them) or STALLED (claimed, and
+// nothing has happened for STALLED_DAYS).
+export type Pin = [number, number, number, 0 | 1, 0 | 1 | 2];
+
+// A claim with no claim, status change, note or move for this many days is stalled.
+export const STALLED_DAYS = 3;
 
 // The district holds a few thousand people; this is the room for a pool several times that. Past it the map says it is not showing
 // everyone.
 export const MAX_PINS = 20_000;
 
-// The open pool inside the box. The partial index people_pool_place (migration 0008) holds exactly these people by latitude and
-// longitude, so the box is read from the index, and the pool condition below is that index's own, word for word.
+// The open pool inside the box, then the claimed people (not cured) inside it, so the pool is never crowded out. The partial indexes
+// people_pool_place (migration 0008) and people_claimed_place (0011) hold exactly these people by latitude and longitude, so the box is
+// read from the index, and the conditions below are those indexes' own, word for word.
 // `narrow` is more conditions on the person (as `p`) and their bind values: the filters Find people shares with the map.
+// `now` is the ISO time to count the days from.
 export async function pinsIn(
   db: Db,
   box: Box,
   narrow: { where: string[]; binds: Value[] } = { where: [], binds: [] },
+  now: string = new Date().toISOString(),
 ): Promise<{ pins: Pin[]; more: boolean }> {
+  const extra = narrow.where.map((w) => ` AND ${w}`).join('');
   const { results } = await db
     .prepare(
       `SELECT p.id, p.lat, p.lon, p.approximate FROM people p
-       WHERE p.assigned_to IS NULL AND p.status != 'cured' AND p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?${narrow.where.map((w) => ` AND ${w}`).join('')}
+       WHERE p.assigned_to IS NULL AND p.status != 'cured' AND p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?${extra}
        ORDER BY p.lat, p.lon LIMIT ?`,
     )
     .bind(box.south, box.north, box.west, box.east, ...narrow.binds, MAX_PINS + 1)
     .all<{ id: number; lat: number; lon: number; approximate: number }>();
-  const more = results.length > MAX_PINS;
-  return { pins: results.slice(0, MAX_PINS).map((r): Pin => [r.id, r.lat, r.lon, r.approximate ? 1 : 0]), more };
+  const pool = results.slice(0, MAX_PINS).map((r): Pin => [r.id, r.lat, r.lon, r.approximate ? 1 : 0, 0]);
+
+  // The last thing a person did for the claim: the claim itself, a status change, a note or a move. (An upload's own rows and the
+  // geocoder do not count; they say nothing about the volunteer.)
+  const claimed = await db
+    .prepare(
+      `SELECT p.id, p.lat, p.lon, p.approximate,
+         (SELECT MAX(a.at) FROM audit a WHERE a.person_id = p.id AND a.action IN ('claim', 'assign', 'reassign', 'status', 'note')) AS last_at
+       FROM people p
+       WHERE p.assigned_to IS NOT NULL AND p.status != 'cured' AND p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?${extra}
+       ORDER BY p.lat, p.lon LIMIT ?`,
+    )
+    .bind(box.south, box.north, box.west, box.east, ...narrow.binds, MAX_PINS + 1)
+    .all<{ id: number; lat: number; lon: number; approximate: number; last_at: string | null }>();
+  const cutoff = Date.parse(now) - STALLED_DAYS * 86_400_000;
+  const held = claimed.results.slice(0, MAX_PINS).map((r): Pin => {
+    const stalled = r.last_at !== null && Date.parse(r.last_at) < cutoff;
+    return [r.id, r.lat, r.lon, r.approximate ? 1 : 0, stalled ? 2 : 1];
+  });
+  return { pins: [...pool, ...held], more: results.length > MAX_PINS || claimed.results.length > MAX_PINS };
 }
 
 // A box from the query string, or null when it is not a box inside the country, south of north and west of east.

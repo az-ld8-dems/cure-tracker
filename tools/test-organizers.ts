@@ -112,6 +112,7 @@ assert.deepEqual(list.grants, [
   { volunteerId: carl, all: true, precincts: [] },
 ]);
 assert.deepEqual(list.precincts, ['Alma', 'Arcadia', 'Cairo']);
+assert.deepEqual(list.siteAdmins, [boss]);
 
 // The organizer is let into the admin pages and the organizer routes, and told what they organize.
 assert.deepEqual(((await call('anna@example.com', 'GET', '/api/me')).data as Me).organizes, { all: false, precincts: ['Alma'] });

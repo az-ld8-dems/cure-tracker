@@ -80,6 +80,9 @@ export interface AuditEntry {
 
 export interface PersonDetail {
   person: Person;
+  // The volunteer who has them (null in the pool), and when that volunteer last claimed them, changed their status, wrote a note or had them moved.
+  claimedBy: Volunteer | null;
+  lastActivityAt: string | null;
   notes: Note[];
   history: AuditEntry[];
 }
@@ -279,7 +282,9 @@ export interface ApiError {
 // GET /api/map: the open pool inside a box, as [id, latitude, longitude, 1 when the place is a guess]; `more` when the box held more than
 // the Worker will send, and `tiles` when the basemap file is in place.
 export interface MapPins {
-  pins: [number, number, number, 0 | 1][];
+  // [id, latitude, longitude, 1 for a guessed place, who has them: 0 nobody, 1 a volunteer, 2 a volunteer who has done nothing for stalledDays].
+  pins: [number, number, number, 0 | 1, 0 | 1 | 2][];
+  stalledDays: number;
   more: boolean;
   tiles: boolean;
   // With facets=1 (the first request): the values the filters offer, as on the list.
@@ -297,4 +302,6 @@ export interface OrganizerGrant {
 export interface OrganizerList {
   grants: OrganizerGrant[];
   precincts: string[];
+  // The volunteers who are site admins: they organize everything, with or without a grant.
+  siteAdmins: number[];
 }

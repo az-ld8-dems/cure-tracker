@@ -2,7 +2,7 @@
 // guesses, refuses a box that is not one, and says whether the basemap file is in place; and the Worker serves that file from its bucket, byte
 // ranges included, only to someone signed in. Synthetic data only.
 import assert from 'node:assert/strict';
-import type { MapPins } from '../src/api.d.ts';
+import type { MapPins, PersonDetail } from '../src/api.d.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { geocodeChunk } from '../worker/geocode.ts';
 import type { TileBucket, TileObject } from '../worker/tiles.ts';
@@ -113,7 +113,7 @@ const whole = await pins(WHOLE);
 assert.equal(whole.more, false);
 assert.deepEqual(
   [...whole.pins].sort((a, b) => a[0] - b[0]),
-  open.map((p) => [p.id, p.lat, p.lon, p.approximate]),
+  open.map((p) => [p.id, p.lat, p.lon, p.approximate, 0]),
   'every open, placed person once, with their place and whether it is a guess',
 );
 assert.equal(whole.tiles, false, 'no tile file is in place yet');
@@ -128,21 +128,44 @@ assert.deepEqual(
   inside.map((p) => p.id),
 );
 
-// claimed and cured people drop out
+// cured people drop out; claimed people stay, marked as claimed
 const claimed = open[0];
 const cured = open[1];
 assert.ok(claimed && cured);
 assert.equal((await call(vera, 'POST', `/api/people/${claimed.id}/claim`, {})).status, 200);
 sqlite.prepare("UPDATE people SET status = 'cured' WHERE id = ?").run(cured.id);
 const after = await pins(WHOLE);
-assert.equal(after.pins.length, open.length - 2);
-assert.ok(!after.pins.some((p) => p[0] === claimed.id || p[0] === cured.id), 'neither the claimed nor the cured is on the map');
+assert.equal(after.pins.length, open.length - 1);
+assert.ok(!after.pins.some((p) => p[0] === cured.id), 'the cured is not on the map');
+assert.deepEqual(
+  after.pins.find((p) => p[0] === claimed.id),
+  [claimed.id, claimed.lat, claimed.lon, claimed.approximate, 1],
+  'the claimed stays, marked as claimed',
+);
+assert.equal(after.stalledDays, 3);
+
+// a claim nobody has touched for more than the stall time is marked stalled; a note makes it fresh again
+sqlite.prepare("UPDATE audit SET at = '2026-10-15T12:00:00.000Z' WHERE person_id = ? AND action = 'claim'").run(claimed.id);
+assert.equal((await pins(WHOLE)).pins.find((p) => p[0] === claimed.id)?.[4], 2, 'stalled');
+assert.equal((await call(vera, 'POST', `/api/people/${claimed.id}/notes`, { body: 'Left a voicemail' })).status, 201);
+assert.equal((await pins(WHOLE)).pins.find((p) => p[0] === claimed.id)?.[4], 1, 'a note is activity');
+
+// anyone signed in sees who has a claimed person, and a person in the pool has no one
+const seen = await json('nina@example.com', `/api/people/${claimed.id}`);
+const seenDetail = seen.data as PersonDetail;
+assert.equal(seenDetail.claimedBy?.email, vera);
+assert.ok(seenDetail.lastActivityAt);
+assert.equal(((await json(vera, `/api/people/${open[2]?.id}`)).data as PersonDetail).claimedBy, null);
 
 // what is sent is only ids and places: no names, addresses or phones
-assert.doesNotMatch(JSON.stringify(after).replace(/[\d.,[\]{}":\-a-z]/g, ''), /./, 'only numbers and the flags around them');
+assert.doesNotMatch(JSON.stringify(after).replace(/[\d.,[\]{}":\-a-zA-Z]/g, ''), /./, 'only numbers and the flags around them');
 
 // --- the filters Find people has narrow the pins the same way
-const idsOf = (m: MapPins): number[] => m.pins.map((p) => p[0]).sort((x, y) => x - y);
+const idsOf = (m: MapPins): number[] =>
+  m.pins
+    .filter((p) => p[4] === 0)
+    .map((p) => p[0])
+    .sort((x, y) => x - y);
 const placedOpen = "assigned_to IS NULL AND status != 'cured' AND lat IS NOT NULL";
 const sqlIds = (where: string, ...binds: string[]): number[] =>
   sqlite

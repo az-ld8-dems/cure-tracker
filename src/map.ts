@@ -51,6 +51,7 @@ const me = await boot();
 const app = $('#app');
 
 if (me) {
+  const myId = me.id;
   const theme = (): 'light' | 'dark' => {
     const set = document.documentElement.getAttribute('data-theme');
     if (set === 'light' || set === 'dark') return set;
@@ -77,6 +78,13 @@ if (me) {
     { class: 'map-legend', 'aria-label': 'Legend' },
     h('li', {}, h('span', { class: 'pin', 'aria-hidden': 'true' }), 'Address found'),
     h('li', {}, h('span', { class: 'pin pin--guess', 'aria-hidden': 'true' }), 'Place is a guess (the middle of a ZIP, or a rough match)'),
+    h('li', {}, h('span', { class: 'pin pin--claimed', 'aria-hidden': 'true' }), 'Grey, dark edge: a volunteer has them'),
+    h(
+      'li',
+      {},
+      h('span', { class: 'pin pin--stalled', 'aria-hidden': 'true' }),
+      'Red, dark edge: a volunteer has them, and nothing has happened for days',
+    ),
     youLegend,
   );
   const refresh = h('button', { class: 'fl-btn', type: 'button', onclick: () => void load() }, 'Refresh');
@@ -148,15 +156,28 @@ if (me) {
       id: 'exact',
       type: 'circle',
       source: 'pins',
-      filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'approximate'], 0]],
+      filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'who'], 0], ['==', ['get', 'approximate'], 0]],
       paint: { 'circle-color': exact, 'circle-stroke-color': ring, 'circle-stroke-width': 2, 'circle-radius': 7 },
     });
     m.addLayer({
       id: 'guess',
       type: 'circle',
       source: 'pins',
-      filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'approximate'], 1]],
+      filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'who'], 0], ['==', ['get', 'approximate'], 1]],
       paint: { 'circle-color': ring, 'circle-stroke-color': guess, 'circle-stroke-width': 3, 'circle-radius': 7 },
+    });
+    // A volunteer has them: grey with a dark edge, red when nothing has happened for days.
+    m.addLayer({
+      id: 'claimed',
+      type: 'circle',
+      source: 'pins',
+      filter: ['all', ['!', ['has', 'point_count']], ['>=', ['get', 'who'], 1]],
+      paint: {
+        'circle-color': ['case', ['==', ['get', 'who'], 2], token('--pin-stalled'), token('--pin-claimed')],
+        'circle-stroke-color': token('--ink'),
+        'circle-stroke-width': 2,
+        'circle-radius': 7,
+      },
     });
     addYou(m);
     markPicked(m);
@@ -194,6 +215,7 @@ if (me) {
     for (const [layer, edge, width] of [
       ['exact', token('--surface-raised'), 2],
       ['guess', token('--pin-guess'), 3],
+      ['claimed', token('--ink'), 2],
     ] as const) {
       m.setPaintProperty(layer, 'circle-stroke-color', ['case', is, token('--ink'), edge]);
       m.setPaintProperty(layer, 'circle-stroke-width', ['case', is, 4, width]);
@@ -204,9 +226,9 @@ if (me) {
   function toGeoJson(): FeatureCollection {
     return {
       type: 'FeatureCollection',
-      features: (pins?.pins ?? []).map(([id, lat, lon, approximate]) => ({
+      features: (pins?.pins ?? []).map(([id, lat, lon, approximate, who]) => ({
         type: 'Feature',
-        properties: { id, approximate },
+        properties: { id, approximate, who },
         geometry: { type: 'Point', coordinates: [lon, lat] },
       })),
     };
@@ -234,7 +256,7 @@ if (me) {
     map = m;
     m.addControl(new NavigationControl({ showCompass: false }), 'top-right');
     m.on('style.load', () => addPins(m));
-    for (const layer of ['exact', 'guess']) {
+    for (const layer of ['exact', 'guess', 'claimed']) {
       m.on('click', layer, (e) => {
         const feature: MapGeoJSONFeature | undefined = e.features?.[0];
         const id = feature?.properties.id;
@@ -250,7 +272,7 @@ if (me) {
       if (typeof clusterId !== 'number' || !center) return;
       void source.getClusterExpansionZoom(clusterId).then((zoom) => m.easeTo({ center: [center[0] ?? 0, center[1] ?? 0], zoom }));
     });
-    for (const layer of ['exact', 'guess', 'groups']) {
+    for (const layer of ['exact', 'guess', 'claimed', 'groups']) {
       m.on('mouseenter', layer, () => {
         m.getCanvas().style.cursor = 'pointer';
       });
@@ -271,15 +293,15 @@ if (me) {
     source?.setData(toGeoJson());
     map?.getSource<GeoJSONSource>('you')?.setData(youGeoJson());
     youLegend.hidden = filters.place() === null;
-    if (map?.getLayer('guess')) markPicked(map);
+    if (map?.getLayer('claimed')) markPicked(map);
   }
 
   async function pick(id: number): Promise<void> {
     picked = id;
     show();
     try {
-      const { person } = await api<PersonDetail>('GET', `/api/people/${id}`);
-      renderPerson(person);
+      const detailed = await api<PersonDetail>('GET', `/api/people/${id}`);
+      renderPerson(detailed);
       // The card sits right under the map. Focus it without the browser's own scroll, and scroll only as far as it takes to show it.
       detail.focus({ preventScroll: true });
       detail.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
@@ -289,7 +311,13 @@ if (me) {
     }
   }
 
-  function renderPerson(p: Person): void {
+  // "3 days ago" for the last thing a volunteer did, counted in whole days from the time the server stored.
+  function sinceText(iso: string): string {
+    const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
+    return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  }
+
+  function renderPerson({ person: p, claimedBy, lastActivityAt }: PersonDetail): void {
     const claimable = p.assignedTo === null && p.status !== 'cured';
     clear(
       detail,
@@ -312,7 +340,18 @@ if (me) {
               { class: 'fl-btn fl-btn--primary', type: 'button', 'aria-label': `Claim ${personName(p)}`, onclick: () => void claim(p) },
               'Claim',
             )
-          : banner('info', h('p', {}, 'Somebody has this person now.')),
+          : claimedBy
+            ? banner(
+                'info',
+                h('p', {}, `${claimedBy.id === myId ? 'You have' : `${claimedBy.name || claimedBy.email} has`} this person.`),
+                h(
+                  'p',
+                  {},
+                  claimedBy.id === myId ? '' : h('a', { href: `mailto:${claimedBy.email}` }, claimedBy.email),
+                  lastActivityAt ? ` Last activity ${sinceText(lastActivityAt)}.` : '',
+                ),
+              )
+            : banner('info', h('p', {}, 'Somebody has this person now.')),
       ),
     );
   }

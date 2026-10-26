@@ -151,7 +151,17 @@ if (me) {
       h('div', { class: 'card-head' }, h('h2', { class: 'fl-card__title' }, personName(p)), statusBadge(p.status)),
       p.flag ? flagBadge(p.flag) : null,
       facts(p, volunteers, false),
-      h('div', { class: 'fl-field' }, h('span', { class: 'fl-label' }, 'What happened?'), seg),
+      h(
+        'div',
+        { class: 'fl-field' },
+        h('span', { class: 'fl-label' }, 'What happened?'),
+        seg,
+        h(
+          'span',
+          { class: 'fl-help' },
+          'Contacted means you gave the cure steps to the voter or a relative. It is a promise, not a cure: they are cured only when the state’s list no longer has them.',
+        ),
+      ),
       field(`method-${p.id}`, 'How did you reach them?', method),
       details,
       h(
