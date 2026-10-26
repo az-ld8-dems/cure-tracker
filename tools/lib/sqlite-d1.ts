@@ -34,9 +34,19 @@ class SqliteStmt implements Stmt {
   }
 }
 
+// D1 refuses SQLite's math functions ("not authorized to use function: power"), which SQLite here allows. Refusing them in every test and in the
+// dev server keeps code that only works on SQLite out: in production they made every search by distance, the map's radius and the town
+// name fail.
+const MATH =
+  /\b(power|pow|sin|cos|tan|asin|acos|atan2?|sqrt|radians|degrees|exp|ln|log|log2|log10|floor|ceil|ceiling|sinh|cosh|tanh)\s*\(/i;
+
 export function sqliteD1(db: DatabaseSync): Db {
   return {
-    prepare: (sql) => new SqliteStmt(db, sql),
+    prepare: (sql) => {
+      const found = MATH.exec(sql);
+      if (found) throw new Error(`D1_ERROR: not authorized to use function: ${found[1]}`);
+      return new SqliteStmt(db, sql);
+    },
     async batch(statements) {
       db.exec('BEGIN');
       try {
