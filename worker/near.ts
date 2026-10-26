@@ -40,6 +40,14 @@ export function nearSql(home: Place, miles: number): { where: string; away: stri
   };
 }
 
+// Great-circle miles between two places, for checks made in the Worker (the SQL above does it for whole searches).
+export function milesBetween(a: Place, b: Place): number {
+  const rad = Math.PI / 180;
+  const h =
+    Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lon - a.lon) * rad) / 2) ** 2;
+  return 2 * EARTH_MILES * Math.asin(Math.sqrt(Math.min(1, h)));
+}
+
 // The place a volunteer saved, or null.
 export async function homeOf(db: Db, volunteerId: number): Promise<Place | null> {
   const row = await db

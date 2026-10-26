@@ -492,14 +492,14 @@ if (me && !me.isAdmin) {
     const list = h(
       'details',
       { class: 'fl-disclosure' },
-      h('summary', {}, `Not placed exactly (${g.unmatched})`),
+      h('summary', {}, `The geocoder could not place (${g.unmatched})`),
       h(
         'div',
         { class: 'fl-stack fl-stack--3' },
         h(
           'p',
           { class: 'fl-help' },
-          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
+          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. Looking them up again also tries the street alone, with no city or ZIP, which finds addresses on a boundary between towns, and believes the answer only if it is within about 15 miles of the middle of their ZIP. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
         ),
         rows,
         h(
@@ -524,7 +524,7 @@ if (me && !me.isAdmin) {
         h(
           'p',
           {},
-          `${g.matched} placed exactly, ${g.approximate} placed roughly (the middle of their ZIP), ${g.waiting} waiting, ${g.unmatched - g.approximate} with no place.`,
+          `${g.matched} placed exactly, ${g.approximate} placed roughly (a close match, or the middle of their ZIP), ${g.waiting} waiting, ${g.noPlace} with no place.`,
         ),
         h(
           'p',

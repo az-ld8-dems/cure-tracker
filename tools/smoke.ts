@@ -255,13 +255,15 @@ try {
   // see her in a list, copy her address, download the list, and ask again.
   await admin.getByRole('heading', { name: 'Where people live' }).waitFor();
   await admin.getByRole('button', { name: /^Look up \d+ addresses$/ }).click();
-  await admin.getByText(/^\d+ placed exactly, 1 placed roughly \(the middle of their ZIP\), 0 waiting, 0 with no place\./).waitFor();
+  await admin
+    .getByText(/^\d+ placed exactly, 1 placed roughly \(a close match, or the middle of their ZIP\), 0 waiting, 0 with no place\./)
+    .waitFor();
   expect(
     'admin geocode',
     await admin.getByRole('button', { name: 'Nobody is waiting' }).isDisabled(),
     'with nobody waiting the button is off',
   );
-  await admin.getByText('Not placed exactly (1)').click();
+  await admin.getByText('The geocoder could not place (1)').click();
   const unplacedRow = admin.getByRole('row', { name: /Nora Nowhere/ });
   await unplacedRow.waitFor();
   expect('admin geocode', /Middle of their ZIP/.test((await unplacedRow.textContent()) ?? ''), 'the list should say what she has for now');

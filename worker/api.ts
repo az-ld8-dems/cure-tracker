@@ -510,8 +510,9 @@ async function adminStats(c: Ctx): Promise<Response> {
          COALESCE(SUM(status = 'contacted'), 0) AS contacted, COALESCE(SUM(status = 'cured'), 0) AS cured,
          COALESCE(SUM(status != 'cured' AND assigned_to IS NULL), 0) AS unassigned,
          COALESCE(SUM(status != 'cured' AND flag IS NOT NULL), 0) AS flagged,
-         COALESCE(SUM(status != 'cured' AND geocode IS NULL), 0) AS waiting, COALESCE(SUM(geocode = 'match'), 0) AS located,
+         COALESCE(SUM(status != 'cured' AND geocode IS NULL), 0) AS waiting, COALESCE(SUM(status != 'cured' AND geocode = 'match' AND approximate = 0), 0) AS located,
          COALESCE(SUM(status != 'cured' AND approximate = 1), 0) AS roughly,
+         COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie') AND approximate = 0), 0) AS nowhere,
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated
        FROM people`,
     )
@@ -525,6 +526,7 @@ async function adminStats(c: Ctx): Promise<Response> {
       waiting: number;
       located: number;
       roughly: number;
+      nowhere: number;
       unlocated: number;
     }>();
   const sample = (await waitingForGeocode(c.db, 0, 3)).map(censusLine);
@@ -589,6 +591,7 @@ async function adminStats(c: Ctx): Promise<Response> {
       waiting: totals?.waiting ?? 0,
       matched: totals?.located ?? 0,
       approximate: totals?.roughly ?? 0,
+      noPlace: totals?.nowhere ?? 0,
       unmatched: totals?.unlocated ?? 0,
       sample,
     },

@@ -101,8 +101,8 @@ for (const request of census.sent) {
     assert.doesNotMatch(line, /555-01|Nora|Tia|Una|Lou|Nowhere|Tied|Lost/, `no name or phone in ${line}`);
   }
 }
-const apt = census.sent.flatMap((r) => r.lines).find((l) => l.includes('MAIN ST APT 4'));
-assert.ok(apt, 'a unit stays in the street line');
+const apt = census.sent.flatMap((r) => r.lines).find((l) => parseCsv(l)[0]?.[1] === '3 E MAIN ST');
+assert.ok(apt, 'the apartment is sent without its APT 4: the Census ignores a unit it understands and can fail on one it does not');
 assert.equal(parseCsv(apt ?? '')[0]?.[2], 'Phoenix', 'and the city is the sheet’s city, not part of the street');
 
 // --- what was stored
@@ -305,6 +305,85 @@ assert.equal(
   null,
   'the new address still waits to be looked up',
 );
+
+// --- the second chance: the street without its unit, a non-exact match as a guess, and the street alone when the sheet's city and ZIP disagree
+const fourth = [
+  { first: 'Bo', last: 'Boundary', address: '10 BOUNDARY RD 109 TEMPE, AZ 85281' },
+  { first: 'Far', last: 'Away', address: '20 FARAWAY ST TEMPE, AZ 85281' },
+  { first: 'Nan', last: 'Nonexact', address: '30 NONEXACT AVE MESA, AZ 85201' },
+  { first: 'Ula', last: 'Unit', address: '40 E MAIN ST 1105 TEMPE, AZ 85281' },
+];
+await uploadCsv(
+  sendAs(admin),
+  sheetCsv([
+    ...moved,
+    { first: 'Wes', last: 'Wells', address: '9 W ELM ST TEMPE, AZ 85281' },
+    { first: 'Zed', last: 'Zane', address: '10 W ELM ST TEMPE, AZ 85281' },
+    ...fourth,
+  ]),
+  { filename: 'day4.csv' },
+);
+const sentBefore4 = census.sent.length;
+await run();
+const firstLines = census.sent.slice(sentBefore4).flatMap((r) => r.lines);
+const lineOf = (lines: string[], needle: string) => lines.find((l) => l.includes(needle)) ?? assert.fail(`no line with ${needle}`);
+assert.equal(parseCsv(lineOf(firstLines, '"40 E MAIN'))[0]?.[1], '40 E MAIN ST', 'a unit written as a bare number is not sent');
+assert.equal(parseCsv(lineOf(firstLines, 'BOUNDARY'))[0]?.[1], '10 BOUNDARY RD', 'nor a unit after the street type, whatever it is');
+assert.ok(!firstLines.some((l) => /b",/.test(l.split(',')[0] ?? '') || /^\d+b,/.test(l)), 'a first lookup sends one line a person');
+assert.deepEqual(
+  [
+    placeOf('Ula')?.geocode,
+    placeOf('Ula')?.approximate,
+    placeOf('Nan')?.geocode,
+    placeOf('Nan')?.approximate,
+    placeOf('Bo')?.geocode,
+    placeOf('Far')?.geocode,
+  ],
+  ['match', 0, 'match', 1, 'no_match', 'no_match'],
+  'an exact match is exact, a non-exact one is a guess, and a street that only fits without the sheet’s city and ZIP is not found yet',
+);
+const guessed = await stats();
+assert.ok(guessed.geocode.approximate >= 3, 'the non-exact match counts as placed roughly, with the two at the middle of their ZIP');
+assert.equal(
+  Number(sqlite.prepare("SELECT COUNT(*) AS n FROM people WHERE first_name = 'Nan' AND geocode = 'match' AND approximate = 1").get()?.n),
+  1,
+);
+const middle85281 = sqlite
+  .prepare("SELECT AVG(lat) AS lat, AVG(lon) AS lon FROM people WHERE zip = '85281' AND geocode = 'match' AND approximate = 0")
+  .get();
+census.behavior.boundaryPoint = { lat: Number(middle85281?.lat) + 0.02, lon: Number(middle85281?.lon) };
+const unplacedBefore = Number(
+  sqlite.prepare("SELECT COUNT(*) AS n FROM people WHERE status != 'cured' AND geocode IN ('no_match', 'tie')").get()?.n,
+);
+const sentBefore5 = census.sent.length;
+const twice = await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });
+assert.equal(twice.status, 200);
+const retryLines = census.sent.slice(sentBefore5).flatMap((r) => r.lines);
+assert.equal(
+  retryLines.length,
+  unplacedBefore * 2,
+  'a retry sends each unplaced person twice: with the sheet’s city and ZIP, and the street alone',
+);
+assert.equal(
+  lineOf(retryLines, 'BOUNDARY RD",""').split(',').slice(1).join(','),
+  '"10 BOUNDARY RD","",AZ,""',
+  'the street alone: no city, no ZIP',
+);
+assert.match(lineOf(retryLines, 'BOUNDARY RD",""'), /^\d+b,/, 'with the person’s id and a b');
+const rescuedBo = placeOf('Bo');
+assert.deepEqual([rescuedBo?.geocode, rescuedBo?.approximate], ['match', 0], 'found by the street alone, near their ZIP: placed');
+assert.ok(Math.abs(Number(rescuedBo?.lat) - (Number(middle85281?.lat) + 0.02)) < 1e-9, 'where the Census put it');
+assert.deepEqual(
+  [placeOf('Far')?.geocode, placeOf('Far')?.approximate],
+  ['no_match', 1],
+  'found in another town: not believed, so still only the middle of its ZIP',
+);
+assert.notEqual(placeOf('Far')?.lat, 35.2);
+// With no middle for the ZIP to check against, a street found alone is not believed either.
+sqlite.prepare("UPDATE people SET zip = '85999' WHERE first_name = 'Bo'").run();
+sqlite.prepare("UPDATE people SET geocode = 'no_match', lat = NULL, lon = NULL, approximate = 0 WHERE first_name = 'Bo'").run();
+await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });
+assert.equal(placeOf('Bo')?.geocode, 'no_match', 'a ZIP with fewer than five placed people has no middle to check against');
 
 // --- the answers as the real Census writes them, including a row with no match, which has only three fields
 const real = [

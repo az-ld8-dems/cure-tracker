@@ -335,13 +335,64 @@ export function splitAddress(address: string): { city: string; zip: string } {
 }
 
 // The street line of an address as the sheet writes it: "3302 N 47TH PL PHOENIX, AZ 85018" is "3302 N 47TH PL" when the city is Phoenix.
-// What a geocoder wants in its street field. A unit stays in it.
+// A unit stays in it.
 export function streetLine(address: string, city: string): string {
   const m = /^(.*?)[\s,]+[A-Za-z]{2}\s+\d{5}(?:-\d{4})?\s*$/.exec(address.trim());
   let stem = (m?.[1] ?? address).replace(/,\s*$/, '').trim();
   if (city !== '') stem = stem.replace(new RegExp(`[\\s,]+${city.trim().replace(/\s+/g, '\\s+')}$`, 'i'), '');
   return stem.trim();
 }
+
+const DIRECTIONS = new Set([
+  'N',
+  'S',
+  'E',
+  'W',
+  'NE',
+  'NW',
+  'SE',
+  'SW',
+  'NORTH',
+  'SOUTH',
+  'EAST',
+  'WEST',
+  'NORTHEAST',
+  'NORTHWEST',
+  'SOUTHEAST',
+  'SOUTHWEST',
+]);
+// Street types as the sheet writes them (STREET, ST, PKWY...), except the ones a number follows as part of the name (HWY 87, ROUTE 66).
+const STREET_TYPES = new Set(
+  [...WORDS.keys(), ...WORDS.values()].filter(
+    (w) => !DIRECTIONS.has(w) && !['HIGHWAY', 'HWY', 'FREEWAY', 'FWY', 'EXPRESSWAY', 'EXPY', 'ROUTE', 'RTE'].includes(w),
+  ),
+);
+// A unit written without its word: 1105, 12B, B, 4-C, B-12.
+const BARE_UNIT = /^(?:\d+[A-Z]?|[A-Z]|\d+-[A-Z0-9]+|[A-Z]-\d+)$/;
+
+// The street without its unit: "1500 W RIO SALADO PKWY 109" and "1500 W RIO SALADO PKWY APT 109" are both "1500 W RIO SALADO PKWY". The
+// geocoder ignores a unit when it understands it (APT 12, UNIT 12, # 12 all matched in a test against the real Census geocoder), and sometimes
+// fails on one written as a bare number after the street type. Left as it is when there is no street type to anchor on, or what follows it is
+// not clearly a unit.
+export function streetWithoutUnit(street: string): string {
+  const tokens = street.trim().split(/\s+/);
+  const word = tokens.findIndex((t, i) => i > 0 && (UNIT_WORDS.has(t.toUpperCase().replace(/[.,]/g, '')) || t.startsWith('#')));
+  if (word > 0) return tokens.slice(0, word).join(' ').replace(/,$/, '');
+  let type = -1;
+  tokens.forEach((t, i) => {
+    if (i > 0 && STREET_TYPES.has(t.replace(/[.,]/g, '').toUpperCase())) type = i;
+  });
+  if (type < 1) return street.trim();
+  let end = type + 1;
+  if (DIRECTIONS.has((tokens[end] ?? '').toUpperCase())) end++;
+  const rest = tokens.slice(end);
+  return rest.length >= 1 && rest.length <= 2 && rest.every((t) => BARE_UNIT.test(t.toUpperCase()))
+    ? tokens.slice(0, end).join(' ')
+    : street.trim();
+}
+
+// What goes in the street field of a geocoder request.
+export const streetForGeocoder = (address: string, city: string): string => streetWithoutUnit(streetLine(address, city));
 
 // The status date as the sheet writes it (2026-10-21, 10/21/2026, 10/21/26, with or without a time) to YYYY-MM-DD, or null.
 export function parseSheetDate(raw: string): string | null {
