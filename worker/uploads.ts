@@ -488,7 +488,8 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
            lat = CASE WHEN people.address = s.address THEN people.lat END, lon = CASE WHEN people.address = s.address THEN people.lon END,
            geocode = CASE WHEN people.address = s.address THEN people.geocode END,
            geocoded_at = CASE WHEN people.address = s.address THEN people.geocoded_at END,
-           approximate = CASE WHEN people.address = s.address THEN people.approximate ELSE 0 END
+           approximate = CASE WHEN people.address = s.address THEN people.approximate ELSE 0 END,
+           placed_by = CASE WHEN people.address = s.address THEN people.placed_by END
          FROM upload_rows s
          WHERE s.key = ${KEY_OF('people')}
            AND (people.status IN ('cured', 'contacted') OR people.contacted_cycles != 0 OR people.key != s.key

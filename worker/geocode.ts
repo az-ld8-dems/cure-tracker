@@ -191,7 +191,8 @@ export async function geocodeChunk(
            json_extract(value, '$.approximate') AS approximate FROM json_each(?1))
          UPDATE people SET
            lat = CASE WHEN j.geocode = 'match' THEN j.lat ELSE people.lat END, lon = CASE WHEN j.geocode = 'match' THEN j.lon ELSE people.lon END,
-           approximate = CASE WHEN j.geocode = 'match' THEN j.approximate ELSE people.approximate END, geocode = j.geocode, geocoded_at = ?2
+           approximate = CASE WHEN j.geocode = 'match' THEN j.approximate ELSE people.approximate END,
+           placed_by = CASE WHEN j.geocode = 'match' THEN NULL ELSE people.placed_by END, geocode = j.geocode, geocoded_at = ?2
          FROM j WHERE people.id = j.id AND people.address = j.address`,
       )
       .bind(JSON.stringify(answers), now),
@@ -224,6 +225,9 @@ interface UnplacedRow {
   address: string;
   geocode: 'no_match' | 'tie';
   approximate: number;
+  placed_by: string | null;
+  lat: number | null;
+  lon: number | null;
 }
 
 // Open people the geocoder could not place, 50 at a time after `after`, for an admin to look up by hand. `approximate` says they have the
@@ -231,7 +235,7 @@ interface UnplacedRow {
 export async function unplacedPeople(db: Db, after: number): Promise<UnplacedPage> {
   const { results } = await db
     .prepare(
-      `SELECT id, first_name, last_name, address, geocode, approximate FROM people
+      `SELECT id, first_name, last_name, address, geocode, approximate, placed_by, lat, lon FROM people
        WHERE id > ?1 AND status != 'cured' AND geocode IN ('no_match', 'tie') ORDER BY id LIMIT ?2`,
     )
     .bind(after, UNPLACED_PAGE + 1)
@@ -244,7 +248,30 @@ export async function unplacedPeople(db: Db, after: number): Promise<UnplacedPag
       address: r.address,
       reason: r.geocode,
       approximate: r.approximate === 1,
+      byHand: r.placed_by !== null && r.lat !== null && r.lon !== null ? { lat: r.lat, lon: r.lon } : null,
     })),
     next: results.length > UNPLACED_PAGE ? (page.at(-1)?.id ?? null) : null,
   };
+}
+
+// What an admin does to a person's place by hand.
+export type HandPlace = { lat: number; lon: number } | null;
+
+// Puts a person at a place an admin looked up (or, with null, takes a hand-placed person's place away). The geocoder's own verdict stays as it
+// was; the place counts as exact, and is the admin's until the geocoder finds the person or an upload changes their address.
+export async function placeByHand(db: Db, actor: string, now: string, id: number, place: HandPlace): Promise<void> {
+  await db.batch([
+    place
+      ? db
+          .prepare('UPDATE people SET lat = ?1, lon = ?2, approximate = 0, placed_by = ?3, geocoded_at = ?4, updated_at = ?4 WHERE id = ?5')
+          .bind(place.lat, place.lon, actor, now, id)
+      : db
+          .prepare(
+            'UPDATE people SET lat = NULL, lon = NULL, approximate = 0, placed_by = NULL, updated_at = ?1 WHERE id = ?2 AND placed_by IS NOT NULL',
+          )
+          .bind(now, id),
+    db
+      .prepare('INSERT INTO audit (at, actor, action, person_id, detail) VALUES (?, ?, ?, ?, ?)')
+      .bind(now, actor, place ? 'person.place' : 'person.unplace', id, '{}'),
+  ]);
 }
