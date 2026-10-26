@@ -168,6 +168,39 @@ assert.match(inWords, /^[A-Za-z ]+ \d{5}$/);
 // a place with no one waiting within 25 miles has no words, but is still saved
 const empty = (await putPlace(walt, { lat: 36.5, lon: -112.0 })).data as { location: { lat: number; near: string | null } };
 assert.deepEqual([empty.location.lat, empty.location.near], [36.5, null]);
+// the answer is the same whichever of the widening rings (2, 8 and 25 miles) it is found in: compare with the nearest person worked out here
+const waiting = sqlite
+  .prepare("SELECT city, zip, lat, lon FROM people WHERE assigned_to IS NULL AND status != 'cured' AND lat IS NOT NULL")
+  .all();
+for (const [lat, lon] of [
+  [33.46, -112.01],
+  [33.52, -111.8],
+  [33.7, -111.9],
+  [33.2, -112.2],
+  [33.9, -112.4],
+  [33.65, -112.45],
+]) {
+  const got = ((await putPlace(walt, { lat, lon })).data as { location: { lat: number; lon: number; near: string | null } }).location;
+  const ranked = waiting
+    .map((r) => ({ r, away: miles(got, { lat: Number(r.lat), lon: Number(r.lon) }) }))
+    .filter((x) => x.away <= 25)
+    .sort((a, b) => a.away - b.away);
+  const want = ranked[0] ? `${ranked[0].r.city} ${ranked[0].r.zip}` : null;
+  assert.equal(got.near, want, `where ${lat}, ${lon} is`);
+}
+
+// a failure of that lookup must not take /api/me down: every page asks it first
+{
+  const real = env.DB;
+  env.DB = { ...real, prepare: (sql: string) => (sql.includes('power(sin') ? assert.fail('the database refused it') : real.prepare(sql)) };
+  const me = await call(vera, 'GET', '/api/me');
+  env.DB = real;
+  assert.equal(me.status, 200, 'still signed in');
+  assert.deepEqual((me.data as Me).location && { lat: (me.data as Me).location?.lat, near: (me.data as Me).location?.near }, {
+    lat: 33.46,
+    near: null,
+  });
+}
 await putPlace(walt, { zip: '85018' });
 for (const radius of [1, 3, 5, 10]) {
   const got = { people: await allOf(vera, `?miles=${radius}&sort=distance`) };

@@ -51,13 +51,24 @@ export function milesBetween(a: Place, b: Place): number {
 // The town of the nearest person in the pool within 25 miles of a place, as "Phoenix 85018", so a volunteer can be told where they are in words.
 // null when no one waiting is that close. Reads a band of the map through the (lat, lon) index.
 export async function nearestTown(db: Db, home: Place): Promise<string | null> {
-  const { where, away } = nearSql(home, 25);
-  const row = await db
-    .prepare(
-      `SELECT p.city, p.zip FROM people p WHERE p.assigned_to IS NULL AND p.status != 'cured' AND ${where} ORDER BY ${away}, p.id LIMIT 1`,
-    )
-    .first<{ city: string; zip: string }>();
-  return row ? [row.city, row.zip].filter((v) => v !== '').join(' ') || null : null;
+  // Widening rings, so the usual answer is found in a small box (a few hundred people) and not by working out the distance of everyone within
+  // 25 miles, which is the whole district. The nearest person overall is in the first ring that holds anyone, so the answer is the same.
+  try {
+    for (const miles of [2, 8, 25]) {
+      const { where, away } = nearSql(home, miles);
+      const row = await db
+        .prepare(
+          `SELECT p.city, p.zip FROM people p WHERE p.assigned_to IS NULL AND p.status != 'cured' AND ${where} ORDER BY ${away}, p.id LIMIT 1`,
+        )
+        .first<{ city: string; zip: string }>();
+      if (row) return [row.city, row.zip].filter((v) => v !== '').join(' ') || null;
+    }
+    return null;
+  } catch (e) {
+    // The town is only words for the page to show; a failed lookup must never take down /api/me, which every page asks first.
+    console.warn('could not name where the volunteer is', e);
+    return null;
+  }
 }
 
 // The place a volunteer saved, or null.
