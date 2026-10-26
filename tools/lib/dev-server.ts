@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { AccessVerifier } from '../../worker/access.ts';
 import { type AppEnv, handle } from '../../worker/app.ts';
 import { portOf, startAssetServer } from './asset-server.ts';
+import { fakeCensus } from './fake-census.ts';
 import { sheetCsv, syntheticPeople } from './sheet.ts';
 import { migratedDb, sqliteD1 } from './sqlite-d1.ts';
 import { type Send, uploadCsv } from './upload-test.ts';
@@ -95,6 +96,7 @@ export async function startDevServer({
     await uploadCsv(send, sheetCsv(syntheticPeople(people)), { filename: 'seed.csv', force: true });
   }
 
+  const census = fakeCensus();
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
@@ -113,7 +115,8 @@ export async function startDevServer({
       const response = await handle(
         new Request(url, { method: req.method ?? 'GET', headers, ...(hasBody ? { body: Buffer.concat(chunks) } : {}) }),
         env,
-        { verifier },
+        // The Census geocoder is a stand-in here: nothing locally ever reaches the network.
+        { verifier, fetcher: census.fetcher },
       );
       const out = Object.fromEntries(response.headers);
       res.writeHead(response.status, out);

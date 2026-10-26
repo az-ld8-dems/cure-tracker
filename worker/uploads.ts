@@ -484,7 +484,10 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
            flag = CASE WHEN people.status = 'cured' THEN 'reappeared' WHEN ${exceeded} THEN 'still_uncured' ELSE people.flag END,
            status_changed_at = CASE WHEN people.status = 'cured' OR (${exceeded}) THEN ?2 ELSE people.status_changed_at END,
            contacted_cycles = CASE WHEN people.status = 'contacted' AND NOT (${exceeded}) THEN people.contacted_cycles + 1 ELSE 0 END,
-           cured_at = NULL, last_upload_id = ?3, updated_at = ?2
+           cured_at = NULL, last_upload_id = ?3, updated_at = ?2,
+           lat = CASE WHEN people.address = s.address THEN people.lat END, lon = CASE WHEN people.address = s.address THEN people.lon END,
+           geocode = CASE WHEN people.address = s.address THEN people.geocode END,
+           geocoded_at = CASE WHEN people.address = s.address THEN people.geocoded_at END
          FROM upload_rows s
          WHERE s.key = ${KEY_OF('people')}
            AND (people.status IN ('cured', 'contacted') OR people.contacted_cycles != 0 OR people.key != s.key

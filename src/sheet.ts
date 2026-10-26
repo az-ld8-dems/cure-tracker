@@ -334,6 +334,15 @@ export function splitAddress(address: string): { city: string; zip: string } {
   return { city: '', zip };
 }
 
+// The street line of an address as the sheet writes it: "3302 N 47TH PL PHOENIX, AZ 85018" is "3302 N 47TH PL" when the city is Phoenix.
+// What a geocoder wants in its street field. A unit stays in it.
+export function streetLine(address: string, city: string): string {
+  const m = /^(.*?)[\s,]+[A-Za-z]{2}\s+\d{5}(?:-\d{4})?\s*$/.exec(address.trim());
+  let stem = (m?.[1] ?? address).replace(/,\s*$/, '').trim();
+  if (city !== '') stem = stem.replace(new RegExp(`[\\s,]+${city.trim().replace(/\s+/g, '\\s+')}$`, 'i'), '');
+  return stem.trim();
+}
+
 // The status date as the sheet writes it (2026-10-21, 10/21/2026, 10/21/26, with or without a time) to YYYY-MM-DD, or null.
 export function parseSheetDate(raw: string): string | null {
   const s = raw.trim();

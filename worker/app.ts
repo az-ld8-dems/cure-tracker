@@ -19,6 +19,8 @@ export interface Deps {
   // For tests and the dev server, which stand in for Access.
   verifier?: AccessVerifier;
   now?: () => Date;
+  // How the Worker reaches other services (the Census geocoder): the global fetch, or a test's own.
+  fetcher?: typeof fetch;
 }
 
 export const text = (status: number, body: string): Response =>
@@ -38,7 +40,14 @@ export async function handle(request: Request, env: AppEnv, deps: Deps = {}): Pr
   const path = new URL(request.url).pathname;
 
   if (path === '/api' || path.startsWith('/api/')) {
-    return handleApi(request, { db: env.DB, email, isAdmin, allowReset: env.ALLOW_RESET === 'true', now: deps.now ?? (() => new Date()) });
+    return handleApi(request, {
+      db: env.DB,
+      email,
+      isAdmin,
+      allowReset: env.ALLOW_RESET === 'true',
+      now: deps.now ?? (() => new Date()),
+      fetcher: deps.fetcher ?? fetch,
+    });
   }
   if ((path === '/admin' || path.startsWith('/admin/')) && !isAdmin) return text(403, 'Forbidden');
   return env.ASSETS.fetch(request);

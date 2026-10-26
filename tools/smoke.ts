@@ -201,6 +201,17 @@ try {
   await admin.getByRole('heading', { name: 'Audit log' }).waitFor();
   await check(admin, 'admin');
 
+  // Look up where people live (the stand-in Census answers): the button says how many are waiting, then nobody is.
+  await admin.getByRole('heading', { name: 'Where people live' }).waitFor();
+  await admin.getByRole('button', { name: /^Look up \d+ addresses$/ }).click();
+  await admin.getByText(/^\d+ placed on the map, 0 waiting/).waitFor();
+  expect(
+    'admin geocode',
+    await admin.getByRole('button', { name: 'Nobody is waiting' }).isDisabled(),
+    'with nobody waiting the button is off',
+  );
+  await check(admin, 'admin geocode');
+
   // Upload a day-two sheet: three people gone, one new, the rest the same.
   const day2 = syntheticPeople(PEOPLE)
     .slice(3)

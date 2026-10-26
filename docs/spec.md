@@ -28,6 +28,10 @@ The admin exports the LD8 tab of the state's workbook as CSV. Columns are matche
 - The status date (`10/21/2026`, `2026-10-21`, with or without a time) gives "days uncured": the days from it to today in Arizona.
 - A row repeated within a file is merged: the later status date wins, blanks are filled from the other row.
 
+### Where people live
+
+An admin presses **Look up addresses** (admin page, "Where people live"). The Worker sends each open person's street address (an id, street, city, state and ZIP; never a name, phone number or note) to the US Census Bureau's batch geocoder, two hundred at a time, and stores the coordinates it answers with in `people` (`lat`, `lon`, `geocode`, `geocoded_at`). The page first shows how many are waiting and the first lines of the next request. Someone the geocoder cannot place, or ties on, is marked and not sent again. An upload that changes a person's address clears their coordinates, so they are looked up again; cured people are never sent. A failed request stores nothing and the run goes on where it stopped. Each request has an `geocode` audit row. Locally (the dev server, the tests) a stand-in answers, so nothing reaches the network. This is for the map and distance filter to come; nothing shows the coordinates yet.
+
 ### What an upload does
 
 The admin picks the file and presses **Check the file**. The browser reads the CSV (`src/sheet.ts`) and sends the people to the Worker a hundred at a time (`src/upload.ts`), because a free Worker has about 10 ms of CPU a request and could not read a large file; the page shows the progress. They wait in a scratch table (`upload_rows`); no person is changed. The page then shows the counts, warnings and possible matches, which the database works out by comparing the staged people with the people (SQL in `worker/uploads.ts`). **Upload this file** applies it, all or nothing, in one batch, without sending the file again. Only one upload is in flight: choosing a file again replaces the staged one, and the upload refuses to apply unless every person arrived. Because the people are read in key order, ids follow the key, not the sheet's order.
@@ -53,6 +57,6 @@ Every change writes a row: who, when, what, which person. Joining, renaming, cla
 
 ## Limits and things not built
 
-- No distance sorting: the sheet has addresses only and the app calls no outside service. Sort and filter are by days uncured, city, precinct, party and name.
+- No distance sorting yet: Find people sorts and filters by days uncured, city, precinct, party and name. Addresses can be placed on the map by the Census geocoder (above); showing them and sorting by distance come next. The geocoder is the only outside service the Worker calls.
 - No notifications, no email, no SMS from the app. Volunteers call or text from their own phones (the phone number is a `tel:` link).
 - D1 and Worker limits matter for big uploads (docs/decisions.md, 17): the browser reads the file, each request carries about a hundred people and one SQL statement, and the comparison and the changes are set operations inside D1. `npm run bench` times it on a synthetic 10,000-person sheet. Staging costs about one row written per person and is cleared after.

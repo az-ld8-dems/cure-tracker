@@ -8,6 +8,7 @@ import type {
   ColumnField,
   ColumnMap,
   ColumnPick,
+  GeocodeProgress,
   PeoplePage,
   Person,
   PossibleMatch,
@@ -59,6 +60,7 @@ if (me && !me.isAdmin) {
     upload: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-upload' }),
     settings: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-settings' }),
     stats: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-stats' }),
+    geocode: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-geocode' }),
     flagged: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-flagged' }),
     volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
     find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
@@ -378,6 +380,71 @@ if (me && !me.isAdmin) {
   }
 
   // ---- numbers and people
+  // ---- where people live
+  function geocodeSection(s: AdminStats): void {
+    const g = s.geocode;
+    const status = h('p', { class: 'fl-help', role: 'status' });
+    const go = h(
+      'button',
+      {
+        class: 'btn',
+        type: 'button',
+        disabled: g.waiting === 0,
+        onclick: async () => {
+          go.disabled = true;
+          let after = 0;
+          let sent = 0;
+          let placed = 0;
+          let tenth = -1;
+          try {
+            for (;;) {
+              const r = await api<GeocodeProgress>('POST', '/api/admin/geocode', { after });
+              sent += r.sent;
+              placed += r.matched;
+              // Say so at every tenth: the status line is read out as it changes.
+              if (Math.floor((sent * 10) / g.waiting) !== tenth) {
+                tenth = Math.floor((sent * 10) / g.waiting);
+                status.textContent = `Looked up ${sent} of ${g.waiting} addresses: ${placed} placed…`;
+              }
+              if (r.next === null) break;
+              after = r.next;
+            }
+            toast(`Looked up ${plural(sent, 'address', 'addresses')}: ${placed} placed.`);
+            await refresh();
+          } catch (e) {
+            go.disabled = false;
+            status.textContent = `Stopped after ${sent} addresses: ${failureText(e)} Press the button to go on; the ones already done are not sent again.`;
+          }
+        },
+      },
+      g.waiting === 0 ? 'Nobody is waiting' : `Look up ${plural(g.waiting, 'address', 'addresses')}`,
+    );
+    clear(
+      sections.geocode,
+      heading('h-geocode', 'Where people live'),
+      h(
+        'div',
+        { class: 'fl-card' },
+        h('p', {}, `${g.matched} placed on the map, ${g.waiting} waiting, ${g.unmatched} the geocoder could not place.`),
+        h(
+          'p',
+          { class: 'fl-help' },
+          'Looking people up sends each waiting address (street, city, state and ZIP, with an id) to the US Census Bureau’s public geocoder, a couple of hundred at a time. Names, phone numbers and notes are never sent, and an address already looked up is not sent again. A new upload that changes someone’s address puts them back in line.',
+        ),
+        g.sample.length > 0
+          ? h(
+              'div',
+              { class: 'fl-stack fl-stack--3' },
+              h('p', { class: 'fl-help' }, 'The first lines of the next request:'),
+              h('ul', { class: 'fl-list' }, ...g.sample.map((line) => h('li', {}, h('code', {}, line)))),
+            )
+          : null,
+        go,
+        status,
+      ),
+    );
+  }
+
   function statsSection(s: AdminStats): void {
     const t = s.totals;
     const last: UploadRecord | null = s.lastUpload;
@@ -637,6 +704,7 @@ if (me && !me.isAdmin) {
     log = firstPage;
     settingsSection(settings);
     statsSection(stats);
+    geocodeSection(stats);
     flaggedSection(stats);
     volunteersSection(stats);
     findSection();
