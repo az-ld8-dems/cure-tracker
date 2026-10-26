@@ -6,6 +6,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { AccessVerifier } from '../../worker/access.ts';
 import { type AppEnv, handle } from '../../worker/app.ts';
+import { geocodeChunk } from '../../worker/geocode.ts';
 import { portOf, startAssetServer } from './asset-server.ts';
 import { fakeCensus } from './fake-census.ts';
 import { sheetCsv, syntheticPeople } from './sheet.ts';
@@ -83,6 +84,7 @@ export async function startDevServer({
   };
 
   // The seed sheet goes in the way the admin page sends one, as the admin.
+  const census = fakeCensus();
   if (people > 0) {
     const verifier: AccessVerifier = {
       verify: async () => ({ ok: true, identity: { email: DEV_ADMIN, serviceToken: null, sub: DEV_ADMIN } }),
@@ -94,9 +96,12 @@ export async function startDevServer({
       return { status: res.status, data: await res.json() };
     };
     await uploadCsv(send, sheetCsv(syntheticPeople(people)), { filename: 'seed.csv', force: true });
+    // ...and placed on the map, by the stand-in Census, as an admin would after the first upload.
+    for (let after = 0, next: number | null = 0; next !== null; after = next ?? 0) {
+      next = (await geocodeChunk(db, DEV_ADMIN, new Date().toISOString(), after, census.fetcher)).next;
+    }
   }
 
-  const census = fakeCensus();
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);

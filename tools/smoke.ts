@@ -98,7 +98,7 @@ try {
   // ---- a new volunteer, on a phone
   const ctx = await context('vera@example.com', { phone: true });
   const page = await ctx.newPage();
-  watch(page, 'volunteer');
+  watch(page, 'volunteer', [400]); // a ZIP nobody is placed in is refused with a 400 on purpose
   await page.goto(`${base}/`);
   await page.getByLabel('Your name').waitFor();
   await check(page, 'welcome');
@@ -122,6 +122,35 @@ try {
   await page.getByLabel('Search name or street').fill('zzzz');
   await page.getByText('Nobody matches.').waitFor();
   await page.getByLabel('Search name or street').fill('');
+  // Near me: nothing is saved at first, so a radius is off. Saving the middle of a ZIP picks ten miles and nearest first, and the distances show.
+  expect('near me', await page.getByLabel('Show people').isDisabled(), 'a radius needs a saved place');
+  expect('near me', (await page.getByRole('option', { name: 'Nearest first' }).isDisabled()) === true, 'nearest first needs a radius');
+  await page.getByLabel('or the middle of a ZIP').fill('99999');
+  await page.getByRole('button', { name: 'Use this ZIP' }).click();
+  await page.getByText(/not enough people placed in that ZIP/).waitFor();
+  await page.getByLabel('or the middle of a ZIP').fill('85018');
+  await page.getByRole('button', { name: 'Use this ZIP' }).click();
+  await page.getByText('Saved where you are.').waitFor();
+  await page.getByText(/Where you are: saved/).waitFor();
+  await page.locator('.pool-row').first().waitFor();
+  expect('near me', (await page.getByLabel('Show people').inputValue()) === '10', 'ten miles was picked');
+  expect('near me', (await page.getByLabel('Sort by').inputValue()) === 'distance', 'nearest first was picked');
+  expect('near me', / mi/.test((await page.locator('.pool-row').first().textContent()) ?? ''), 'a person shows how far away they are');
+  await check(page, 'find people (near me)');
+  // The device's location works the same way.
+  await ctx.grantPermissions(['geolocation'], { origin: base });
+  await ctx.setGeolocation({ latitude: 33.4567, longitude: -112.0149 });
+  await page.getByRole('button', { name: 'Use my location' }).click();
+  await page.getByText('Saved where you are.').last().waitFor();
+  // Forgetting it puts everything back.
+  await page.getByRole('button', { name: 'Forget where I am' }).click();
+  await page.getByText('Forgot where you are.').waitFor();
+  expect(
+    'near me',
+    (await page.getByLabel('Show people').inputValue()) === '' && (await page.getByLabel('Sort by').inputValue()) === 'days',
+    'forgetting resets the search',
+  );
+  expect('near me', !(await page.locator('.pool-row').first().textContent())?.includes(' mi'), 'and the distances go');
   await page.getByLabel('Sort by').selectOption('name');
   const firstRow = page.locator('.pool-row').first();
   const claimedName = (await firstRow.locator('strong').textContent()) ?? '';

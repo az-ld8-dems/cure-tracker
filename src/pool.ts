@@ -1,5 +1,5 @@
-// "Find people": everyone who still needs curing and has nobody yet. Filter by city, precinct or party, sort, and claim.
-import type { PeoplePage, Person } from './api.d.ts';
+// "Find people": everyone who still needs curing and has nobody yet. Filter by city, precinct, party or how far away, sort, and claim.
+import type { Me, PeoplePage, Person } from './api.d.ts';
 import {
   $,
   addressText,
@@ -31,6 +31,8 @@ if (me) {
   let people: Person[] = [];
   let hasMore = false;
   let precincts: string[] = [];
+  // Where the volunteer saved themselves for "near me" (rounded to about a mile; only they ever see it), or null.
+  let place: Me['location'] = me.location;
 
   const search = h('input', { class: 'fl-input', id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
   const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reload() });
@@ -58,7 +60,35 @@ if (me) {
     h('option', { value: 'precinct' }, 'Precinct'),
     h('option', { value: 'city' }, 'City'),
     h('option', { value: 'name' }, 'Last name'),
+    h('option', { value: 'distance', disabled: true }, 'Nearest first'),
   );
+  // "Within N miles" of the place the volunteer saved. A radius is what keeps a search by distance cheap, so sorting by distance needs one.
+  const radius = h(
+    'select',
+    {
+      class: 'fl-select',
+      id: 'radius',
+      disabled: place === null,
+      onchange: () => {
+        reversed = false;
+        syncRadius();
+        reload();
+      },
+    },
+    h('option', { value: '' }, 'Any distance'),
+    ...[1, 3, 5, 10, 25].map((m) => h('option', { value: String(m) }, `Within ${plural(m, 'mile')}`)),
+  );
+  const zip = h('input', {
+    class: 'fl-input',
+    id: 'zip',
+    type: 'text',
+    inputmode: 'numeric',
+    autocomplete: 'postal-code',
+    maxlength: '5',
+    placeholder: '85018',
+  });
+  const nearStatus = h('p', { class: 'fl-help', role: 'status' });
+  const forget = h('button', { class: 'fl-btn', type: 'button', onclick: () => void savePlace({ clear: true }) }, 'Forget where I am');
   // The other filters sit in a disclosure on a phone. Where there is room it stays open, its summary is hidden, and they share a row with
   // the search box (app.css).
   const filters = h(
@@ -67,11 +97,40 @@ if (me) {
     h('summary', {}, 'Filter and sort'),
     h(
       'div',
-      { class: 'fl-toolbar' },
-      field('city', 'City', city),
-      field('precinct', 'Precinct', precinct),
-      field('party', 'Party', party),
-      field('sort', 'Sort by', sort),
+      { class: 'fl-stack fl-stack--3' },
+      h(
+        'div',
+        { class: 'fl-toolbar' },
+        field('city', 'City', city),
+        field('precinct', 'Precinct', precinct),
+        field('party', 'Party', party),
+        field('sort', 'Sort by', sort),
+      ),
+      // Near me: where the volunteer is, and how far to look.
+      h(
+        'div',
+        { class: 'fl-stack fl-stack--3' },
+        nearStatus,
+        h(
+          'div',
+          { class: 'fl-cluster pool-near-row' },
+          field('radius', 'Show people', radius),
+          h('button', { class: 'fl-btn', type: 'button', onclick: () => here() }, 'Use my location'),
+          h(
+            'form',
+            {
+              class: 'fl-cluster pool-near-row',
+              onsubmit: (e: Event) => {
+                e.preventDefault();
+                void savePlace({ zip: zip.value.trim() });
+              },
+            },
+            field('zip', 'or the middle of a ZIP', zip),
+            h('button', { class: 'fl-btn', type: 'submit' }, 'Use this ZIP'),
+          ),
+          forget,
+        ),
+      ),
     ),
   );
   const room = window.matchMedia('(min-width: 48rem)');
@@ -109,6 +168,9 @@ if (me) {
     sortHeads.set(by, { th, direction });
     return th;
   }
+  // The distance column shows only in a search by distance.
+  const awayHead = head('Away', 'distance');
+  awayHead.hidden = true;
   const table = h(
     'div',
     { class: 'fl-table-wrap pool-table', role: 'region', 'aria-label': 'People waiting for a volunteer', tabindex: '0' },
@@ -127,6 +189,7 @@ if (me) {
           head('Precinct', 'precinct'),
           head('Party'),
           head('Uncured', 'days', 'descending'),
+          awayHead,
           head('Reason'),
           h('th', { scope: 'col' }, h('span', { class: 'fl-sr-only' }, 'Claim')),
         ),
@@ -143,6 +206,57 @@ if (me) {
     select.value = previous;
   }
 
+  const searchingByDistance = (): boolean => place !== null && radius.value !== '';
+  // "1.3 mi", or "about 1.3 mi" for someone who only has the middle of their ZIP.
+  const awayText = (p: Person): string =>
+    p.distanceMiles === undefined ? '' : `${p.approximate ? 'about ' : ''}${p.distanceMiles.toFixed(1)} mi`;
+
+  // What the page says and allows, given whether a place is saved and a radius picked: nearest first needs both.
+  function syncRadius(): void {
+    radius.disabled = place === null;
+    forget.hidden = place === null;
+    const by = searchingByDistance();
+    const nearest = sort.querySelector<HTMLOptionElement>('option[value="distance"]');
+    if (nearest) nearest.disabled = !by;
+    // Picking a radius for the first time means "who is closest"; dropping it puts the sort back.
+    if (by && sort.value !== 'distance' && lastRadius === '') sort.value = 'distance';
+    if (!by && sort.value === 'distance') sort.value = 'days';
+    lastRadius = radius.value;
+    awayHead.hidden = !by;
+    nearStatus.textContent =
+      place === null
+        ? 'Where you are: not saved. Save it to see who is closest. It is kept to about a mile, only you can see it, and you can forget it any time.'
+        : 'Where you are: saved, to about a mile. Only you can see it.';
+  }
+  let lastRadius = '';
+
+  // Saves, or forgets, where the volunteer is: from their device, or the middle of a ZIP (the Worker works it out).
+  async function savePlace(body: object): Promise<void> {
+    try {
+      place = (await api<{ location: Me['location'] }>('PUT', '/api/me/location', body)).location;
+      toast(place ? 'Saved where you are.' : 'Forgot where you are.');
+      if (place === null) radius.value = '';
+      else if (radius.value === '') radius.value = '10';
+      syncRadius();
+      await reload(true);
+    } catch (e) {
+      toast(failureText(e), 'error');
+    }
+  }
+
+  // The device's location, rounded to about a mile here before it is sent.
+  function here(): void {
+    if (!('geolocation' in navigator)) {
+      toast('This browser cannot share where it is. Use a ZIP instead.', 'error');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => void savePlace({ lat: Math.round(pos.coords.latitude * 100) / 100, lon: Math.round(pos.coords.longitude * 100) / 100 }),
+      () => toast('Your browser did not share where you are. Use a ZIP instead.', 'error'),
+      { maximumAge: 600_000, timeout: 15_000 },
+    );
+  }
+
   // The server filters, sorts and pages; the page asks again when a filter changes. A slow answer to an older question is dropped.
   let asked = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -153,6 +267,7 @@ if (me) {
   function question(offset: number): string {
     const params = new URLSearchParams({ scope: 'pool', sort: sort.value, limit: String(PAGE), offset: String(offset) });
     if (reversed) params.set('dir', 'desc');
+    if (place !== null && radius.value !== '') params.set('miles', radius.value);
     for (const [name, value] of [
       ['q', search.value.trim()],
       ['city', city.value],
@@ -246,13 +361,14 @@ if (me) {
       h('td', {}, p.precinct || 'Unknown'),
       h('td', {}, p.party || 'Unknown'),
       h('td', { class: 'fl-nowrap' }, daysText(p)),
+      h('td', { class: 'fl-nowrap', hidden: !searchingByDistance() }, awayText(p)),
       h('td', {}, p.reasonCode ? titleCase(p.reasonCode) : ''),
       h('td', {}, claimButton(p)),
     );
   }
 
   function compactRow(p: Person): HTMLElement {
-    const meta = [p.precinct, p.party, p.daysUncured === null ? '' : daysText(p)].filter((v) => v !== '').join(' · ');
+    const meta = [p.precinct, p.party, p.daysUncured === null ? '' : daysText(p), awayText(p)].filter((v) => v !== '').join(' · ');
     return h(
       'li',
       { class: 'pool-row' },
@@ -292,6 +408,7 @@ if (me) {
   }
 
   try {
+    syncRadius();
     showSort();
     const first = await api<PeoplePage>('GET', `${question(0)}&facets=1`);
     people = first.people;

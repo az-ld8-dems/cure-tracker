@@ -24,6 +24,7 @@ import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, unplacedPeople, waitingForGeocode } from './geocode.ts';
+import { homeOf, inCountry, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import {
   finishStage,
   graceCycles,
@@ -127,11 +128,15 @@ interface PersonRow {
   assigned_to: number | null;
   flag: Person['flag'];
   notes_count: number;
+  // In a "within N miles" search: the distance in miles, and whether the place is a guess.
+  away?: number;
+  approximate?: number;
 }
 
-const PERSON_SELECT = `SELECT p.id, p.first_name, p.middle_name, p.last_name, p.party, p.reason_code, p.phone, p.address, p.city, p.zip,
+const PERSON_COLUMNS = `SELECT p.id, p.first_name, p.middle_name, p.last_name, p.party, p.reason_code, p.phone, p.address, p.city, p.zip,
     p.precinct, p.status_date, p.status, p.status_changed_at, p.contact_method, p.assigned_to, p.flag,
-    (SELECT COUNT(*) FROM notes n WHERE n.person_id = p.id) AS notes_count
+    (SELECT COUNT(*) FROM notes n WHERE n.person_id = p.id) AS notes_count`;
+const PERSON_SELECT = `${PERSON_COLUMNS}
   FROM people p`;
 
 function toPerson(r: PersonRow, today: string): Person {
@@ -155,6 +160,7 @@ function toPerson(r: PersonRow, today: string): Person {
     assignedTo: r.assigned_to,
     flag: r.flag,
     notesCount: r.notes_count,
+    ...(r.away === undefined ? {} : { distanceMiles: Math.round(r.away * 10) / 10, approximate: r.approximate === 1 }),
   };
 }
 
@@ -199,7 +205,7 @@ async function getMe(c: Ctx): Promise<Response> {
     // Being seen is not worth a page that does not load.
     console.warn('could not record last_seen_at', e);
   }
-  const me: Me = { ...c.me, isAdmin: c.isAdmin };
+  const me: Me = { ...c.me, isAdmin: c.isAdmin, location: await homeOf(c.db, c.me.id) };
   return json(me);
 }
 
@@ -209,8 +215,41 @@ async function putMe(c: Ctx, _p: string[], body: Body): Promise<Response> {
     c.db.prepare('UPDATE volunteers SET name = ? WHERE id = ?').bind(name, c.me.id),
     auditStmt(c, 'volunteer.rename', null, { from: c.me.name, to: name }),
   ]);
-  const me: Me = { ...c.me, name, isAdmin: c.isAdmin };
+  const me: Me = { ...c.me, name, isAdmin: c.isAdmin, location: await homeOf(c.db, c.me.id) };
   return json(me);
+}
+
+// Saves, or clears, where the volunteer is for "near me": a point from their device, or the middle of a ZIP. Rounded to about a mile either
+// way, and the log says only that it happened: never where.
+async function putLocation(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  let place: Place | null;
+  let via: 'device' | 'zip' | 'clear';
+  if (body.clear === true) {
+    place = null;
+    via = 'clear';
+  } else if (body.zip !== undefined) {
+    const zip = text(body, 'zip', 5);
+    if (!/^\d{5}$/.test(zip)) throw new HttpError(400, 'A ZIP is five digits');
+    const middle = await zipCenter(c.db, zip);
+    if (!middle)
+      throw new HttpError(
+        400,
+        'There are not enough people placed in that ZIP to tell where it is. Try a nearby ZIP, or use your location.',
+      );
+    place = { lat: roundPlace(middle.lat), lon: roundPlace(middle.lon) };
+    via = 'zip';
+  } else if (typeof body.lat === 'number' && typeof body.lon === 'number') {
+    place = { lat: roundPlace(body.lat), lon: roundPlace(body.lon) };
+    if (!inCountry(place)) throw new HttpError(400, 'That place is outside the United States');
+    via = 'device';
+  } else {
+    throw new HttpError(400, 'Send lat and lon, or a zip, or clear: true');
+  }
+  await c.db.batch([
+    c.db.prepare('UPDATE volunteers SET home_lat = ?, home_lon = ? WHERE id = ?').bind(place?.lat ?? null, place?.lon ?? null, c.me.id),
+    auditStmt(c, place ? 'location.set' : 'location.clear', null, place ? { via } : {}),
+  ]);
+  return json({ location: place });
 }
 
 async function listVolunteers(c: Ctx): Promise<Response> {
@@ -261,8 +300,22 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
   const scope = url.searchParams.get('scope') ?? 'pool';
   if (scope !== 'pool' && scope !== 'mine' && scope !== 'all') throw new HttpError(400, 'scope must be pool, mine or all');
   if (scope === 'all' && !c.isAdmin) throw new HttpError(403, 'Forbidden');
-  const terms = PEOPLE_SORTS.get(url.searchParams.get('sort') ?? 'days');
-  if (terms === undefined) throw new HttpError(400, `sort must be one of ${[...PEOPLE_SORTS.keys()].join(', ')}`);
+  // "Within N miles" of the place the volunteer saved: only for the pool, and only with a saved place. Sorting by distance needs it too,
+  // because a sort over everyone would read the whole pool.
+  const milesRaw = url.searchParams.get('miles') ?? '';
+  let near: { where: string; away: string } | null = null;
+  if (milesRaw !== '') {
+    if (scope !== 'pool') throw new HttpError(400, 'miles only applies to the pool');
+    const miles = Number(milesRaw);
+    if (!Number.isFinite(miles) || miles < 0.5 || miles > 100) throw new HttpError(400, 'miles must be from 0.5 to 100');
+    const home = await homeOf(c.db, c.me.id);
+    if (!home) throw new HttpError(400, 'Save your location first');
+    near = nearSql(home, miles);
+  }
+  const sortName = url.searchParams.get('sort') ?? 'days';
+  if (sortName === 'distance' && !near) throw new HttpError(400, 'Sorting by distance needs miles and a saved location');
+  const terms = sortName === 'distance' ? ['away', 'p.id'] : PEOPLE_SORTS.get(sortName);
+  if (terms === undefined) throw new HttpError(400, `sort must be one of ${[...PEOPLE_SORTS.keys(), 'distance'].join(', ')}`);
   const dir = url.searchParams.get('dir') ?? 'asc';
   if (dir !== 'asc' && dir !== 'desc') throw new HttpError(400, 'dir must be asc or desc');
   const order = terms.map((t) => (dir === 'desc' ? `${t} DESC` : t)).join(', ');
@@ -276,6 +329,7 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
     where.push('p.assigned_to = ?');
     binds.push(c.me.id);
   }
+  if (near) where.push(near.where);
   const city = filterParam(url, 'city');
   if (city !== '') {
     where.push('p.city COLLATE NOCASE = ?');
@@ -303,7 +357,9 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
 
   const clause = where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`;
   const { results } = await c.db
-    .prepare(`${PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`)
+    .prepare(
+      `${near ? `${PERSON_COLUMNS}, p.approximate AS approximate, ${near.away} AS away\n  FROM people p` : PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`,
+    )
     .bind(...binds, limit + 1, offset)
     .all<PersonRow>();
   const page: PeoplePage = { people: results.slice(0, limit).map((r) => toPerson(r, c.today)), hasMore: results.length > limit };
@@ -843,6 +899,7 @@ interface Route {
 const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/me$/, admin: false, handler: getMe },
   { method: 'PUT', pattern: /^\/api\/me$/, admin: false, handler: putMe },
+  { method: 'PUT', pattern: /^\/api\/me\/location$/, admin: false, handler: putLocation },
   { method: 'GET', pattern: /^\/api\/volunteers$/, admin: false, handler: listVolunteers },
   { method: 'GET', pattern: /^\/api\/people$/, admin: false, handler: listPeople },
   { method: 'GET', pattern: /^\/api\/people\/(\d+)$/, admin: false, handler: getPerson },
