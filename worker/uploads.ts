@@ -26,6 +26,8 @@ interface Facets {
   cities: string[];
   parties: string[];
   precincts: string[];
+  // The precincts each city has people in, so choosing a city can narrow the precincts offered (a precinct that crosses a city line is under both).
+  precinctsByCity: Record<string, string[]>;
 }
 
 const distinct = (values: string[]): string[] => [...new Set(values)].filter((v) => v !== '').sort();
@@ -35,6 +37,11 @@ function facetsOf(people: { city: string; party: string; precinct: string }[]): 
     cities: distinct(people.map((p) => p.city)),
     parties: distinct(people.map((p) => p.party)),
     precincts: distinct(people.map((p) => p.precinct)),
+    precinctsByCity: Object.fromEntries(
+      distinct(people.map((p) => p.city))
+        .map((city) => [city, distinct(people.filter((p) => p.city === city).map((p) => p.precinct))] as const)
+        .filter(([, precincts]) => precincts.length > 0),
+    ),
   };
 }
 
@@ -52,8 +59,16 @@ export async function savedFacets(db: Db): Promise<Facets> {
     if (typeof raw === 'object' && raw !== null) {
       const f = raw as Record<string, unknown>;
       const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
-      if (strings(f.cities) && strings(f.parties) && strings(f.precincts))
-        return { cities: f.cities, parties: f.parties, precincts: f.precincts };
+      const by = f.precinctsByCity;
+      if (
+        strings(f.cities) &&
+        strings(f.parties) &&
+        strings(f.precincts) &&
+        typeof by === 'object' &&
+        by !== null &&
+        Object.values(by).every(strings)
+      )
+        return { cities: f.cities, parties: f.parties, precincts: f.precincts, precinctsByCity: by as Record<string, string[]> };
     }
   } catch {
     // Damaged: work it out again.
@@ -517,7 +532,10 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
       `INSERT INTO settings (key, value) VALUES ('facets', json_object(
          'cities', json((SELECT json_group_array(city) FROM (SELECT DISTINCT city FROM upload_rows WHERE city != '' ORDER BY city))),
          'parties', json((SELECT json_group_array(party) FROM (SELECT DISTINCT party FROM upload_rows WHERE party != '' ORDER BY party))),
-         'precincts', json((SELECT json_group_array(precinct) FROM (SELECT DISTINCT precinct FROM upload_rows WHERE precinct != '' ORDER BY precinct)))))
+         'precincts', json((SELECT json_group_array(precinct) FROM (SELECT DISTINCT precinct FROM upload_rows WHERE precinct != '' ORDER BY precinct))),
+         'precinctsByCity', json((SELECT json_group_object(city, json(precincts)) FROM (
+            SELECT city, json_group_array(precinct) AS precincts FROM (
+              SELECT DISTINCT city, precinct FROM upload_rows WHERE city != '' AND precinct != '' ORDER BY city, precinct) GROUP BY city)))))
        ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
     ),
     db

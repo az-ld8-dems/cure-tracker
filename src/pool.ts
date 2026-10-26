@@ -31,11 +31,22 @@ if (me) {
   let people: Person[] = [];
   let hasMore = false;
   let precincts: string[] = [];
+  // The cities the filter knows, and the precincts of each, so a city narrows the precincts offered and a precinct narrows the cities.
+  let cities: string[] = [];
+  let byCity: Record<string, string[]> = {};
   // Where the volunteer saved themselves for "near me" (rounded to about a mile; only they ever see it), or null.
   let place: Me['location'] = me.location;
 
   const search = h('input', { class: 'fl-input', id: 'search', type: 'search', autocomplete: 'off', oninput: () => reset() });
-  const city = h('select', { class: 'fl-select', id: 'city', onchange: () => reload() });
+  const city = h('select', {
+    class: 'fl-select',
+    id: 'city',
+    onchange: () => {
+      // A precinct typed that this city has no one in no longer applies.
+      if (precinct.value.trim() !== '' && knownPrecinct() === '') precinct.value = '';
+      reload();
+    },
+  });
   // Precincts are a long list, so this is a type-to-filter combobox rather than a select. Empty means all precincts. The filter applies once
   // the text is a precinct on the list: the server matches a whole precinct, which is what its index answers.
   const precinct = h('input', {
@@ -43,8 +54,13 @@ if (me) {
     id: 'precinct',
     type: 'text',
     placeholder: 'All precincts',
-    oninput: () => reset(),
+    oninput: () => {
+      syncCities();
+      reset();
+    },
   });
+  // The list of matches floats under the field, so opening it moves nothing else (Frostline's own puts it in the flow).
+  const precinctList = h('ul', { class: 'pool-popover' });
   const party = h('select', { class: 'fl-select', id: 'party', onchange: () => reload() });
   const sort = h(
     'select',
@@ -117,8 +133,6 @@ if (me) {
     },
     'Cancel',
   );
-  // The other filters sit in a disclosure on a phone. Where there is room it stays open, its summary is hidden, and they share a row with
-  // the search box (app.css).
   // The ways to save where you are: the device's location, or the middle of a ZIP.
   const setPlace = h(
     'div',
@@ -138,35 +152,38 @@ if (me) {
     ),
     cancel,
   );
+  // The other filters sit in a disclosure on a phone. Where there is room it stays open, its summary is hidden, and they share a row with
+  // the search box (app.css).
   const filters = h(
     'details',
     { class: 'fl-disclosure' },
     h('summary', {}, 'Filter and sort'),
     h(
       'div',
+      { class: 'fl-toolbar' },
+      field('city', 'City', city),
+      h('div', { class: 'fl-field pool-combo' }, h('label', { class: 'fl-label', for: 'precinct' }, 'Precinct'), precinct, precinctList),
+      field('party', 'Party', party),
+      field('sort', 'Sort by', sort),
+    ),
+  );
+  // Near me is a box of its own, labelled, because these controls are about the volunteer's own place and not about the voters: where they are
+  // and how far to look. It is one row of controls under what the page knows.
+  const near = h(
+    'details',
+    { class: 'fl-disclosure pool-near' },
+    h('summary', {}, 'Near me'),
+    h(
+      'div',
       { class: 'fl-stack fl-stack--3' },
-      h(
-        'div',
-        { class: 'fl-toolbar' },
-        field('city', 'City', city),
-        field('precinct', 'Precinct', precinct),
-        field('party', 'Party', party),
-        field('sort', 'Sort by', sort),
-      ),
-      // Near me: where the volunteer is, and how far to look.
-      h(
-        'div',
-        { class: 'fl-stack fl-stack--3' },
-        nearStatus,
-        h('div', { class: 'fl-cluster pool-near-row' }, field('radius', 'Show people', radius), change, forget),
-        setPlace,
-      ),
+      nearStatus,
+      h('div', { class: 'fl-cluster pool-near-row' }, field('radius', 'Show people', radius), change, forget, setPlace),
     ),
   );
   const room = window.matchMedia('(min-width: 48rem)');
-  filters.open = room.matches;
+  for (const box of [filters, near]) box.open = room.matches;
   room.addEventListener('change', () => {
-    filters.open = room.matches;
+    for (const box of [filters, near]) box.open = room.matches;
   });
   const count = h('p', { class: 'fl-note', role: 'status' });
   // Two views of the same page: a table where there is room, and compact rows on a phone. CSS shows one of them (.pool-table, .pool-rows).
@@ -234,6 +251,12 @@ if (me) {
     const previous = select.value;
     clear(select, h('option', { value: '' }, all), ...values.map((v) => h('option', { value: v }, label(v))));
     select.value = previous;
+  }
+
+  // The cities offered: all of them, or the ones the precinct typed is in.
+  function syncCities(): void {
+    const only = knownPrecinct();
+    fill(city, 'All cities', only === '' ? cities : cities.filter((c) => byCity[c]?.includes(only)));
   }
 
   const searchingByDistance = (): boolean => place !== null && radius.value !== '';
@@ -305,7 +328,8 @@ if (me) {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   // The precinct typed, as the list spells it, or '' when it is empty or not (yet) on the list.
-  const knownPrecinct = (): string => precincts.find((v) => v.toLowerCase() === precinct.value.trim().toLowerCase()) ?? '';
+  const precinctsShown = (): string[] => (city.value === '' ? precincts : (byCity[city.value] ?? []));
+  const knownPrecinct = (): string => precinctsShown().find((v) => v.toLowerCase() === precinct.value.trim().toLowerCase()) ?? '';
 
   function question(offset: number): string {
     const params = new URLSearchParams({ scope: 'pool', sort: sort.value, limit: String(PAGE), offset: String(offset) });
@@ -457,16 +481,21 @@ if (me) {
     people = first.people;
     hasMore = first.hasMore;
     lastQuestion = question(0);
-    const facets = first.facets ?? { cities: [], parties: [], precincts: [] };
-    fill(city, 'All cities', facets.cities);
+    const facets = first.facets ?? { cities: [], parties: [], precincts: [], precinctsByCity: {} };
+    cities = facets.cities;
+    byCity = facets.precinctsByCity;
     precincts = facets.precincts;
+    syncCities();
     window.Frostline.combobox(precinct, {
       mode: 'suggest',
       label: 'Precincts',
+      list: precinctList,
       openOnFocus: true,
       options: (query) => {
         const q = query.trim().toLowerCase();
-        return precincts.filter((v) => v.toLowerCase().includes(q)).map((v) => ({ id: v, label: v }));
+        return precinctsShown()
+          .filter((v) => v.toLowerCase().includes(q))
+          .map((v) => ({ id: v, label: v }));
       },
     });
     fill(party, 'All parties', facets.parties, (v) => v);
@@ -477,6 +506,7 @@ if (me) {
         { class: 'pool-filters', role: 'search', onsubmit: (e) => e.preventDefault() },
         field('search', 'Search name or street', search),
         filters,
+        near,
       ),
       count,
       table,

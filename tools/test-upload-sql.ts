@@ -399,7 +399,20 @@ for (let seed = 1; seed <= 250; seed++) {
   const sorted = (f: (p: IncomingPerson) => string) => [...new Set(sheet.map(f))].filter((v) => v !== '').sort();
   assert.deepEqual(
     facets,
-    { cities: sorted((p) => p.city), parties: sorted((p) => p.party), precincts: sorted((p) => p.precinct) },
+    {
+      cities: sorted((p) => p.city),
+      parties: sorted((p) => p.party),
+      precincts: sorted((p) => p.precinct),
+      // A city with no precinct on the sheet has no entry: nothing to narrow to.
+      precinctsByCity: Object.fromEntries(
+        sorted((p) => p.city)
+          .map(
+            (city) =>
+              [city, [...new Set(sheet.filter((p) => p.city === city).map((p) => p.precinct))].filter((v) => v !== '').sort()] as const,
+          )
+          .filter(([, precincts]) => precincts.length > 0),
+      ),
+    },
     `seed ${seed}: facets`,
   );
   assert.equal(Number(sqlite.prepare('SELECT COUNT(*) AS n FROM upload_rows').get()?.n), 0, `seed ${seed}: staging is cleared`);

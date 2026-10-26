@@ -135,6 +135,22 @@ try {
   await page.getByText(/Showing \d+ people/).waitFor();
   const tempe = await page.locator('.pool-row').count();
   expect('find people', tempe > 0 && tempe <= 30, `filtering by city showed ${tempe} cards`);
+  // The precinct list shows only the precincts of the chosen city, and opening it moves no other control.
+  const precinctBox = page.getByLabel('Precinct', { exact: true });
+  const cityBox = await page.getByLabel('City').boundingBox();
+  await precinctBox.click();
+  const inTempe = await page.locator('.pool-popover [role="option"]').count();
+  const cityBoxOpen = await page.getByLabel('City').boundingBox();
+  expect('find people', JSON.stringify(cityBox) === JSON.stringify(cityBoxOpen), 'opening the precinct list moved the city field');
+  await page.getByLabel('City').selectOption('');
+  await precinctBox.blur();
+  await precinctBox.click();
+  const inAll = await page.locator('.pool-popover [role="option"]').count();
+  expect('find people', inTempe > 0 && inTempe < inAll, `${inTempe} precincts in Tempe, ${inAll} in all`);
+  await page.getByLabel('City').selectOption('Tempe');
+  await page.getByText(/Showing \d+ people/).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByText('Near me', { exact: true }).click();
   await page.getByLabel('City').selectOption('');
   await page.getByLabel('Search name or street').fill('zzzz');
   await page.getByText('Nobody matches.').waitFor();
