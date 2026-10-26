@@ -27,17 +27,17 @@ const num = (n: number): string => `(${n.toFixed(8)})`;
 // SQL for "within `miles` of `home`", for the people p: a box the (lat, lon) index can read (the smallest box that holds the circle), then
 // the circle itself. `away` is the distance in miles, for sorting and for the distance shown. The numbers are ones this code worked out,
 // written into the SQL; nothing from a request.
-// `box` is only the square around the place (two cheap range conditions the pool's index answers); `where` adds the exact distance, and
-// `away` is that distance, for sorting and showing. The square alone is for callers that check the distance themselves (the map).
-export function nearSql(home: Place, miles: number): { where: string; away: string; box: string } {
+export function nearSql(home: Place, miles: number): { where: string; away: string } {
   const angle = miles / EARTH_MILES;
   const dLat = angle * DEGREES;
   // The longitude reach of a circle of this size at this latitude; past the poles' neighbourhood it would be the whole globe.
   const dLon = Math.asin(Math.min(1, Math.sin(angle) / Math.cos((home.lat * Math.PI) / 180))) * DEGREES;
   const haversine = `(power(sin(radians(p.lat - ${num(home.lat)}) / 2), 2) + cos(radians(${num(home.lat)})) * cos(radians(p.lat)) * power(sin(radians(p.lon - ${num(home.lon)}) / 2), 2))`;
   const away = `(2 * ${num(EARTH_MILES)} * asin(sqrt(min(1.0, ${haversine}))))`;
-  const box = `p.lat BETWEEN ${num(home.lat - dLat)} AND ${num(home.lat + dLat)} AND p.lon BETWEEN ${num(home.lon - dLon)} AND ${num(home.lon + dLon)}`;
-  return { away, box, where: `${box} AND ${away} <= ${num(miles)}` };
+  return {
+    away,
+    where: `p.lat BETWEEN ${num(home.lat - dLat)} AND ${num(home.lat + dLat)} AND p.lon BETWEEN ${num(home.lon - dLon)} AND ${num(home.lon + dLon)} AND ${away} <= ${num(miles)}`,
+  };
 }
 
 // Great-circle miles between two places, for checks made in the Worker (the SQL above does it for whole searches).
