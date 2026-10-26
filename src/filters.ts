@@ -89,7 +89,15 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
   // "Within N miles" of the place the volunteer saved. A radius is what keeps a search by distance cheap, so sorting by distance needs one.
   const radius = h(
     'select',
-    { class: 'fl-select', id: 'radius', disabled: place === null, onchange: () => (syncNear(), changed()) },
+    {
+      class: 'fl-select',
+      id: 'radius',
+      disabled: place === null,
+      onchange: () => {
+        syncNear();
+        changed();
+      },
+    },
     h('option', { value: '' }, 'Any distance'),
     ...[1, 3, 5, 10, 25].map((m) => h('option', { value: String(m) }, `Within ${plural(m, 'mile')}`)),
   );
