@@ -402,14 +402,14 @@ try {
   await admin.getByText(/Looked up 1 address: 0 placed/).waitFor();
 
   // The grace period saves, and shows after a reload.
-  await admin.getByLabel('Uploads a contacted person may stay on the list').fill('0');
+  await admin.getByLabel('Uploads a contacted person may stay on the list before being flagged').fill('0');
   await admin.getByRole('button', { name: 'Save', exact: true }).click();
   await admin.getByText('Saved: 0 uploads of grace.').waitFor();
   await admin.reload();
   await admin.getByRole('heading', { name: 'Unsuccessful cures' }).waitFor();
   expect(
     'admin settings',
-    (await admin.getByLabel('Uploads a contacted person may stay on the list').inputValue()) === '0',
+    (await admin.getByLabel('Uploads a contacted person may stay on the list before being flagged').inputValue()) === '0',
     'the grace was not kept',
   );
   await check(admin, 'admin settings');
