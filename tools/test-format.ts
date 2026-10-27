@@ -20,10 +20,7 @@ const say = (action: string, detail: Record<string, unknown> = {}) =>
 
 assert.equal(say('claim'), 'claimed');
 assert.equal(say('release', { from: 1 }), 'released back to the pool');
-assert.equal(
-  say('status', { from: 'needs_contact', to: 'left_voicemail' }),
-  'marked left voicemail / texted flyer (was needs to be contacted)',
-);
+assert.equal(say('status', { from: 'needs_contact', to: 'left_voicemail' }), 'marked left a message (was needs to be contacted)');
 assert.equal(say('note'), 'added a note');
 assert.equal(say('assign', { from: null, to: 1 }), 'moved from the pool to Vera Vale');
 assert.equal(say('reassign', { from: 1, to: null, count: 1 }), 'moved 1 person from Vera Vale to the pool');
