@@ -48,6 +48,32 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props = 
   return el;
 }
 
+// A combobox's list that floats over the page instead of taking room in it: it lives in the body, fixed under the input (or above it near
+// the bottom of the window; under `anchor` when the input is only part of the field), so a table's sideways scroll cannot clip it and the row does not grow. Pass it to Frostline's combobox as `list`.
+export function floatingList(input: HTMLInputElement, anchor: HTMLElement = input): HTMLUListElement {
+  const list = h('ul', { class: 'combo-float', 'data-for': input.id });
+  document.body.append(list);
+  const place = (): void => {
+    if (list.hidden) return;
+    // A redraw takes inputs out of the page and leaves their lists in the body: clear those away as one opens. (Not when a list is made,
+    // since a table is built before it is put in the page and its inputs are not in the page yet.)
+    for (const old of document.querySelectorAll<HTMLElement>('.combo-float')) {
+      if (old !== list && !document.getElementById(old.dataset.for ?? '')) old.remove();
+    }
+    const box = anchor.getBoundingClientRect();
+    const above = window.innerHeight - box.bottom < 240 && box.top > window.innerHeight - box.bottom;
+    list.classList.toggle('combo-float--up', above);
+    list.style.insetInlineStart = `${box.left}px`;
+    list.style.minInlineSize = `${box.width}px`;
+    list.style.insetBlockStart = above ? 'auto' : `${box.bottom}px`;
+    list.style.insetBlockEnd = above ? `${window.innerHeight - box.top}px` : 'auto';
+  };
+  new MutationObserver(place).observe(list, { attributes: true, attributeFilter: ['hidden'] });
+  window.addEventListener('scroll', place, { capture: true, passive: true });
+  window.addEventListener('resize', place, { passive: true });
+  return list;
+}
+
 export function clear(el: Element, ...children: Child[]): void {
   el.replaceChildren(...children.filter((c): c is Node | string => c !== null && c !== false && c !== undefined));
 }

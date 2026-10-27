@@ -500,11 +500,32 @@ try {
   await admin.goto(`${base}/admin/`);
   await admin.getByRole('heading', { name: 'Who organizes precincts' }).waitFor();
   await check(admin, 'admin: who organizes');
+  // The list of "Move all open people to" floats over the page: it does not make its row or the table any bigger.
+  const moveTo = admin.getByLabel(/^Move everyone .* has open to$/).first();
+  const moveRow = moveTo.locator('xpath=ancestor::tr');
+  const rowBefore = await moveRow.evaluate((el) => el.getBoundingClientRect().height);
+  const tableBefore = await moveRow.evaluate((el) => el.closest('.fl-table-wrap')?.scrollWidth ?? 0);
+  await moveTo.click();
+  const floating = admin.locator('.combo-float:not([hidden])').first();
+  await floating.waitFor();
+  expect('combobox', (await floating.evaluate((el) => getComputedStyle(el).position)) === 'fixed', 'the list is not floating');
+  expect(
+    'combobox',
+    (await moveRow.evaluate((el) => el.getBoundingClientRect().height)) === rowBefore,
+    'the row grew when the list opened',
+  );
+  expect(
+    'combobox',
+    (await moveRow.evaluate((el) => el.closest('.fl-table-wrap')?.scrollWidth ?? 0)) === tableBefore,
+    'the table got wider when the list opened',
+  );
+  await moveTo.press('Escape');
+
   await admin.getByRole('button', { name: 'Change what Olive Organizer organizes' }).click();
   await check(admin, 'admin: change what a volunteer organizes');
   // Precincts are picked from the district's list, one at a time, and show as buttons that take one away.
   await admin.getByLabel('Or only these precincts').fill('Alma');
-  await admin.locator('.fl-combobox__list [role="option"]').first().click();
+  await admin.locator('.combo-float:not([hidden]) [role="option"]').first().click();
   await admin
     .getByRole('button', { name: /^Remove / })
     .first()
