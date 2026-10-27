@@ -102,7 +102,7 @@ if (me) {
     h(
       'p',
       { class: 'fl-help' },
-      'A number is a group of people; zoom in to see each one. The map is a picture and does not work with a keyboard or screen reader. ',
+      'A number is a group of people, blue if anyone in it is unclaimed and yellow if a volunteer has all of them; zoom in to see each one. The map is a picture and does not work with a keyboard or screen reader. ',
       h('a', { href: '/pool/' }, 'Find people'),
       ' lists the same people and can sort them by how far away they are.',
     ),
@@ -141,6 +141,8 @@ if (me) {
       cluster: true,
       clusterRadius: 36,
       clusterMaxZoom: 15,
+      // How many in a group are open (nobody has them), so a group is blue while anyone in it can be claimed.
+      clusterProperties: { open: ['+', ['case', ['==', ['get', 'who'], 0], 1, 0]] },
     });
     m.addLayer({
       id: 'groups',
@@ -148,8 +150,8 @@ if (me) {
       source: 'pins',
       filter: ['has', 'point_count'],
       paint: {
-        'circle-color': token('--brand-strong'),
-        'circle-stroke-color': ring,
+        'circle-color': ['case', ['>', ['get', 'open'], 0], token('--brand-strong'), token('--pin-claimed')],
+        'circle-stroke-color': ['case', ['>', ['get', 'open'], 0], ring, token('--ink')],
         'circle-stroke-width': 2,
         'circle-radius': ['step', ['get', 'point_count'], 14, 25, 18, 100, 22, 500, 28],
       },
@@ -160,7 +162,7 @@ if (me) {
       source: 'pins',
       filter: ['has', 'point_count'],
       layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Medium'], 'text-size': 12 },
-      paint: { 'text-color': token('--on-brand') },
+      paint: { 'text-color': ['case', ['>', ['get', 'open'], 0], token('--on-brand'), token('--on-pin-claimed')] },
     });
     m.addLayer({
       id: 'exact',
