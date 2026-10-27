@@ -85,6 +85,7 @@ if (me) {
       h('span', { class: 'pin pin--stalled', 'aria-hidden': 'true' }),
       'Red, outlined: a volunteer has them, and nothing has happened for days',
     ),
+    h('li', {}, h('span', { class: 'pin-line', 'aria-hidden': 'true' }), 'Edge of Legislative District 8'),
     youLegend,
   );
   const refresh = h('button', { class: 'fl-btn', type: 'button', onclick: () => void load() }, 'Refresh');
@@ -125,6 +126,15 @@ if (me) {
     const exact = token('--pin-exact');
     const guess = token('--pin-guess');
     const ring = token('--surface-raised');
+    // The district's outline, under the pins: a dashed line in the text color, with no fill so it never covers a pin.
+    m.addSource('ld8', { type: 'geojson', data: '/map/ld8.json' });
+    m.addLayer({
+      id: 'ld8-outline',
+      type: 'line',
+      source: 'ld8',
+      layout: { 'line-join': 'round' },
+      paint: { 'line-color': token('--ink'), 'line-width': 2, 'line-dasharray': [3, 2] },
+    });
     m.addSource('pins', {
       type: 'geojson',
       data: toGeoJson(),
