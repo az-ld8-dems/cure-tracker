@@ -546,6 +546,14 @@ th[aria-sort="descending"] > .pool-sort::after {
   background: var(--pin-stalled);
 }
 
+/* The district's outline, as the map draws it: a dashed line in the text color. */
+.pin-line {
+  box-sizing: border-box;
+  inline-size: 1rem;
+  block-size: 0;
+  border-block-start: 3px dashed var(--ink);
+}
+
 .pin--you {
   border-color: var(--surface-raised);
   background: var(--pin-you);
