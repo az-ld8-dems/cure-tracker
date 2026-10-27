@@ -13,9 +13,11 @@
 | Status | Set by | Meaning |
 | --- | --- | --- |
 | Needs to be contacted | upload (new person), volunteer | nobody has reached them |
-| Left voicemail / texted flyer | volunteer | tried, no conversation; with no method chosen, it counts as a phone call |
+| Left a message | volunteer | tried, no conversation: a voicemail, a text, or instructions left at the door; with no method chosen, it counts as a phone call |
 | Contacted | volunteer | the volunteer talked to them, or gave the cure steps to someone at the door; the ballot should be cured. A promise to cure is not a cure: only the sheet no longer listing them is |
 | Cured | upload only | the state's sheet no longer lists them |
+
+How they reached the person is a separate choice: phone call, text, phone call and text, voicemail and text, email, in person (spoke with the voter, witnessed the cure, spoke with someone else at the address, or left instructions at the door), or other. It does not change the status: "witnessed the cure" is a claim by the volunteer, so the person stays Contacted until the state's sheet stops listing them, and only then is Cured.
 
 A volunteer can never set Cured: only the state's data can verify it. Claims do not expire and there is no limit.
 

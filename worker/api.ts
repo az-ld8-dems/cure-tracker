@@ -91,7 +91,18 @@ const headers = { 'content-type': 'application/json; charset=utf-8', 'cache-cont
 const json = (data: unknown, status = 200): Response => new Response(JSON.stringify(data), { status, headers });
 
 const STATUSES_VOLUNTEERS_SET = ['needs_contact', 'left_voicemail', 'contacted'] as const;
-const METHODS = ['call', 'text', 'email', 'in_person', 'other'] as const;
+const METHODS = [
+  'call',
+  'text',
+  'call_and_text',
+  'voicemail_and_text',
+  'email',
+  'in_person',
+  'in_person_cured',
+  'in_person_other',
+  'in_person_door',
+  'other',
+] as const;
 
 const isObject = (v: unknown): v is Body => typeof v === 'object' && v !== null && !Array.isArray(v);
 

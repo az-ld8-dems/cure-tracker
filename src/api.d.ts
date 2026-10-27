@@ -4,7 +4,17 @@
 export type Status = 'needs_contact' | 'left_voicemail' | 'contacted' | 'cured';
 // still_uncured (an unsuccessful cure): marked contacted, yet still on the sheet after the admins' grace period. reappeared: was cured, but is on a later upload again.
 export type Flag = 'still_uncured' | 'reappeared';
-export type ContactMethod = 'call' | 'text' | 'email' | 'in_person' | 'other';
+export type ContactMethod =
+  | 'call'
+  | 'text'
+  | 'call_and_text'
+  | 'voicemail_and_text'
+  | 'email'
+  | 'in_person'
+  | 'in_person_cured'
+  | 'in_person_other'
+  | 'in_person_door'
+  | 'other';
 
 export interface Me {
   id: number;

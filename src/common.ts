@@ -108,7 +108,7 @@ export const volunteerName = (v: Pick<Volunteer, 'name' | 'email'> | undefined):
 
 const STATUS_LABELS: Record<Status, string> = {
   needs_contact: 'Needs to be contacted',
-  left_voicemail: 'Left voicemail / texted flyer',
+  left_voicemail: 'Left a message',
   contacted: 'Contacted',
   cured: 'Cured',
 };
@@ -123,8 +123,13 @@ export const flagLabel = (f: Flag): string => FLAG_LABELS[f];
 export const METHOD_LABELS: Record<ContactMethod, string> = {
   call: 'Phone call',
   text: 'Text',
+  call_and_text: 'Phone call and text',
+  voicemail_and_text: 'Voicemail and text',
   email: 'Email',
-  in_person: 'In person',
+  in_person: 'In person: spoke with the voter',
+  in_person_cured: 'In person: witnessed the cure',
+  in_person_other: 'In person: spoke with someone else at the address',
+  in_person_door: 'In person: left instructions at the door',
   other: 'Other',
 };
 

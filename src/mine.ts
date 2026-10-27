@@ -26,7 +26,7 @@ const app = $('#app');
 // Cured is only ever set by an upload of the state's sheet.
 const CHOICES: [Status, string][] = [
   ['needs_contact', 'Needs contact'],
-  ['left_voicemail', 'Left voicemail'],
+  ['left_voicemail', 'Left a message'],
   ['contacted', 'Contacted'],
 ];
 const ORDER: Record<Status, number> = { needs_contact: 0, left_voicemail: 1, contacted: 2, cured: 3 };
@@ -48,7 +48,7 @@ if (me) {
       summary,
       tiles(
         [count('needs_contact'), 'To contact'],
-        [count('left_voicemail'), 'Left voicemail'],
+        [count('left_voicemail'), 'Left a message'],
         [count('contacted'), 'Contacted'],
         [open.filter((p) => p.flag !== null).length, 'Need another look'],
       ),

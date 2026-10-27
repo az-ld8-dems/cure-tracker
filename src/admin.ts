@@ -786,7 +786,7 @@ if (me && !me.isAdmin && !me.organizes) {
       tiles(
         [t.unassigned, 'Waiting for a volunteer'],
         [t.needsContact, 'To contact'],
-        [t.leftVoicemail, 'Left voicemail'],
+        [t.leftVoicemail, 'Left a message'],
         [t.contacted, 'Contacted'],
         [t.cured, 'Cured'],
       ),
