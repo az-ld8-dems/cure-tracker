@@ -101,9 +101,9 @@ if (me) {
     h(
       'p',
       { class: 'fl-help' },
-      'A number is a group of people; zoom in to see each one. The map is a picture, so for a list that works with a keyboard or screen reader, use ',
+      'A number is a group of people; zoom in to see each one. The map is a picture and does not work with a keyboard or screen reader. ',
       h('a', { href: '/pool/' }, 'Find people'),
-      ', which can also sort by how far away people are.',
+      ' lists the same people and can sort them by how far away they are.',
     ),
   );
 

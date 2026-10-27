@@ -376,12 +376,7 @@ if (me && !me.isAdmin && !me.organizes) {
             }
           },
         },
-        field(
-          'grace',
-          'Uploads a contacted person may stay on the list',
-          grace,
-          'The state’s data runs behind the phone calls. After a volunteer marks someone contacted, this many uploads may still list them before it counts as an unsuccessful cure.',
-        ),
+        field('grace', 'Uploads a contacted person may stay on the list before being flagged', grace),
         h('button', { class: 'btn', type: 'submit' }, 'Save'),
       ),
     );
