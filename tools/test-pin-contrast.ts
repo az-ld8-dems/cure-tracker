@@ -54,6 +54,8 @@ const OUTLINES: [string, string][] = [
   ['--pin-stalled', '--ink'],
 ];
 const STANDS_OUT = 3;
+// The count on a group made only of claimed people is text on the claimed yellow.
+const TEXT = 4.5;
 
 for (const [theme, vars] of Object.entries(themes)) {
   for (const [i, a] of FILLS.entries()) {
@@ -62,6 +64,11 @@ for (const [theme, vars] of Object.entries(themes)) {
       assert.ok(r >= APART, `${theme}: ${a} and ${b} differ by only ${r.toFixed(2)}:1 (needs ${APART}:1), so they look alike without hue`);
     }
   }
+  const onClaimed = ratio(colorOf(vars, '--on-pin-claimed'), colorOf(vars, '--pin-claimed'));
+  assert.ok(
+    onClaimed >= TEXT,
+    `${theme}: the count on a claimed group (--on-pin-claimed) is only ${onClaimed.toFixed(2)}:1 on --pin-claimed (needs ${TEXT}:1)`,
+  );
   for (const [pin, outline] of OUTLINES) {
     const r = ratio(colorOf(vars, outline), colorOf(vars, '--surface-raised'));
     assert.ok(
