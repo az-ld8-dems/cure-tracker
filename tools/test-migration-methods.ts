@@ -67,7 +67,18 @@ assert.deepEqual(
 assert.equal(dump(`SELECT name FROM sqlite_master WHERE name IN ('people_new', 'notes_aside')`).length, 0, 'no leftover table');
 
 const set = (id: number, method: string) => db.prepare('UPDATE people SET contact_method = ? WHERE id = ?').run(method, id);
-for (const m of ['call', 'text', 'call_and_text', 'voicemail_and_text', 'email', 'in_person', 'in_person_other', 'in_person_door', 'other'])
+for (const m of [
+  'call',
+  'text',
+  'call_and_text',
+  'voicemail_and_text',
+  'email',
+  'in_person',
+  'in_person_cured',
+  'in_person_other',
+  'in_person_door',
+  'other',
+])
   set(1, m);
 assert.throws(() => set(1, 'carrier_pigeon'), /CHECK constraint/, 'an unknown method is still refused');
 assert.throws(

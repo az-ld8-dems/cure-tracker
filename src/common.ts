@@ -127,6 +127,7 @@ export const METHOD_LABELS: Record<ContactMethod, string> = {
   voicemail_and_text: 'Voicemail and text',
   email: 'Email',
   in_person: 'In person: spoke with the voter',
+  in_person_cured: 'In person: witnessed the cure',
   in_person_other: 'In person: spoke with someone else at the address',
   in_person_door: 'In person: left instructions at the door',
   other: 'Other',

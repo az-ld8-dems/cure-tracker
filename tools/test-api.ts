@@ -326,7 +326,7 @@ assert.deepEqual(
   detail.history.map((h) => h.action),
   ['note', 'note', 'status', 'claim'],
 );
-for (const m of ['call_and_text', 'voicemail_and_text', 'in_person', 'in_person_other', 'in_person_door']) {
+for (const m of ['call_and_text', 'voicemail_and_text', 'in_person', 'in_person_cured', 'in_person_other', 'in_person_door']) {
   const said = await ok<Person>(vera, 'POST', `/api/people/${p1.id}/status`, { status: 'left_voicemail', method: m });
   assert.equal(said.contactMethod, m, `${m} is a way to have reached someone`);
 }

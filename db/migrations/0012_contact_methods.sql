@@ -25,7 +25,7 @@ CREATE TABLE people_new (
   status_date TEXT,
   status TEXT NOT NULL DEFAULT 'needs_contact' CHECK (status IN ('needs_contact', 'left_voicemail', 'contacted', 'cured')),
   status_changed_at TEXT NOT NULL,
-  contact_method TEXT CHECK (contact_method IN ('call', 'text', 'call_and_text', 'voicemail_and_text', 'email', 'in_person', 'in_person_other', 'in_person_door', 'other')),
+  contact_method TEXT CHECK (contact_method IN ('call', 'text', 'call_and_text', 'voicemail_and_text', 'email', 'in_person', 'in_person_cured', 'in_person_other', 'in_person_door', 'other')),
   assigned_to INTEGER REFERENCES volunteers (id),
   flag TEXT CHECK (flag IN ('still_uncured', 'reappeared')),
   -- How many uploads have listed this person since a volunteer last marked them contacted (0 when they are not marked contacted).

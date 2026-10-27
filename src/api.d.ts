@@ -11,6 +11,7 @@ export type ContactMethod =
   | 'voicemail_and_text'
   | 'email'
   | 'in_person'
+  | 'in_person_cured'
   | 'in_person_other'
   | 'in_person_door'
   | 'other';
