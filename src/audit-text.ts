@@ -3,7 +3,7 @@ import type { AuditEntry } from './api.d.ts';
 
 const STATUS_WORDS: Record<string, string> = {
   needs_contact: 'needs to be contacted',
-  left_voicemail: 'left voicemail / texted flyer',
+  left_voicemail: 'left a message',
   contacted: 'contacted',
   cured: 'cured',
 };

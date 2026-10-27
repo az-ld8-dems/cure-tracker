@@ -231,8 +231,8 @@ try {
   const mine = page.locator('.people > li').first();
   await mine.waitFor();
   expect('my people', (await mine.locator('h2').textContent()) === claimedName, 'the claimed person is first on My people');
-  await mine.getByRole('button', { name: 'Left voicemail' }).click();
-  await mine.getByRole('button', { name: 'Left voicemail', pressed: true }).waitFor();
+  await mine.getByRole('button', { name: 'Left a message' }).click();
+  await mine.getByRole('button', { name: 'Left a message', pressed: true }).waitFor();
   await mine.getByLabel('How did you reach them?').selectOption('text');
   await mine.getByText('Notes (0)').click();
   await mine.getByLabel('Add a note').fill('Texted the flyer, will call tomorrow.');
@@ -241,7 +241,7 @@ try {
   await check(page, 'my people (a card with notes open)');
   await page.reload();
   const again = page.locator('.people > li').first();
-  await again.getByRole('button', { name: 'Left voicemail', pressed: true }).waitFor();
+  await again.getByRole('button', { name: 'Left a message', pressed: true }).waitFor();
   expect('my people', (await again.getByLabel('How did you reach them?').inputValue()) === 'text', 'the contact method was not kept');
   await again.getByText('Notes (1)').click();
   await again.getByText('Texted the flyer, will call tomorrow.').waitFor();
