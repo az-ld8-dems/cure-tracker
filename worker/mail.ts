@@ -31,7 +31,8 @@ export function assignedHtml(who: string, link: string): string {
 <h1 style="margin:0 0 16px;font-size:22px;color:#12294a">You have a new voter to contact</h1>
 <p style="margin:0 0 24px"><strong>${escapeHtml(who)}</strong> assigned you a voter.</p>
 <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#b4501f;border-radius:6px"><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;color:#ffffff;${font};font-size:16px;font-weight:bold;text-decoration:none">View my list</a></td></tr></table>
-<p style="margin:24px 0 0;font-size:14px;color:#4a5668">This email has no voter information in it. Sign in to see who to contact.</p>
+<p style="margin:16px 0 0;font-size:14px;color:#4a5668">Or type this address into your browser: ${escapeHtml(link)}</p>
+<p style="margin:16px 0 0;font-size:14px;color:#4a5668">This email has no voter information in it. Sign in to see who to contact.</p>
 </td></tr>
 </table>
 </td></tr>

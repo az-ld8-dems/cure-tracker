@@ -76,6 +76,7 @@ assert.match(mail?.text ?? '', /Bea Boss \(boss@example\.com\) assigned you a vo
 assert.match(mail?.text ?? '', /https:\/\/cure\.example\//);
 assert.doesNotMatch(`${mail?.subject}\n${mail?.text}\n${mail?.html}`, /Secret|Person|Alma/, 'no voter data in the email');
 assert.match(mail?.html ?? '', /<a href="https:\/\/cure\.example\/"[^>]*>View my list<\/a>/, 'a clickable link');
+assert.match(mail?.html ?? '', /Or type this address into your browser: https:\/\/cure\.example\//, 'the address in plain text too');
 assert.match(mail?.html ?? '', /Bea Boss \(boss@example\.com\)/);
 assert.equal(assignedHtml('<b>"x"</b>', 'https://a/?a=1&b=2').includes('<b>'), false, 'names are escaped');
 
