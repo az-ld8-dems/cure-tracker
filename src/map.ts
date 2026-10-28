@@ -355,7 +355,7 @@ if (me) {
           ...(p.flag ? [flagBadge(p.flag)] : []),
           h('span', {}, `${daysText(p)} uncured`),
         ),
-        h('p', {}, addressText(`${p.address}, ${p.city} ${p.zip}`)),
+        h('p', {}, addressText(p.address)),
         p.party ? h('p', { class: 'fl-help' }, `Party ${titleCase(p.party)}`) : h('span'),
         claimable
           ? h(
