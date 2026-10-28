@@ -15,6 +15,7 @@ The LD8 doc is the **Arizona LD8 Democrats design system** (Claude artifact `VmU
 | Card (a record in a list), with the LD8 h3 as its title | Frostline `fl-card` | `fl-card__title` is restyled to Barlow 26/30 in `app.css` |
 | Status and flag badges | Frostline `fl-badge` | `statusBadge`, `flagBadge` in `src/common.ts` |
 | Joined status buttons | Frostline `fl-seg` + `Frostline.segmented` | `src/mine.ts` |
+| Admin page sections | Frostline `fl-tabs` + `Frostline.tabs` | `src/admin.ts` |
 | Notes and the cured list | Frostline `fl-disclosure` | |
 | Notes and errors (a tinted note with words in it) | Frostline `fl-banner` | `banner()` |
 | Messages after an action | Frostline `Frostline.toast` | `toast()` |

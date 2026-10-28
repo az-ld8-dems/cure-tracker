@@ -326,8 +326,14 @@ try {
   await admin.getByRole('button', { name: 'Continue' }).click();
   await admin.getByText('You don’t have anybody yet.').waitFor();
   await admin.getByRole('link', { name: 'Admin', exact: true }).click();
-  await admin.getByRole('heading', { name: 'Upload the state’s sheet' }).waitFor();
+  // The page is four tabs: a site admin sees all of them, and the first one is showing.
+  await admin.getByRole('heading', { name: 'Where things stand' }).waitFor();
+  expect('admin', (await admin.getByRole('tab').count()) === 4, 'a site admin should have four tabs');
+  await admin.getByRole('tab', { name: 'Settings and log', exact: true }).click();
   await admin.getByRole('heading', { name: 'Audit log' }).waitFor();
+  await admin.getByRole('tab', { name: 'People data', exact: true }).click();
+  await admin.getByRole('heading', { name: 'Upload the state’s sheet' }).waitFor();
+  const dataPanel = admin.getByRole('tabpanel', { name: 'People data' });
   await check(admin, 'admin');
 
   // Upload a day-two sheet: three people gone, two new, the rest the same.
@@ -343,13 +349,15 @@ try {
   await admin.getByText('Newly cured').waitFor();
   expect(
     'admin upload',
-    /^New people2/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    /^New people2/.test((await dataPanel.locator('.tiles').first().textContent()) ?? ''),
     'the preview did not show 2 new people',
   );
   await check(admin, 'admin upload preview');
   await admin.getByRole('button', { name: 'Upload this file' }).click();
   await admin.getByText('Uploaded. 2 added, 3 cured, 0 flagged.').waitFor();
+  await admin.getByRole('tab', { name: 'Overview', exact: true }).click();
   await admin.getByText(/Last upload: day2\.csv/).waitFor();
+  await admin.getByRole('tab', { name: 'People data', exact: true }).click();
 
   // Look up where people live (the stand-in Census answers). One person cannot be placed: she gets the middle of her ZIP, and an admin can
   // see her in a list, copy her address, download the list, and ask again.
@@ -402,6 +410,7 @@ try {
   await admin.getByText(/Looked up 1 address: 0 placed/).waitFor();
 
   // The grace period saves, and shows after a reload.
+  await admin.getByRole('tab', { name: 'Settings and log', exact: true }).click();
   await admin.getByLabel('Uploads a contacted person may stay on the list before being flagged').fill('0');
   await admin.getByRole('button', { name: 'Save', exact: true }).click();
   await admin.getByText('Saved: 0 uploads of grace.').waitFor();
@@ -415,6 +424,7 @@ try {
   await check(admin, 'admin settings');
 
   // A bad file is explained, not swallowed.
+  await admin.getByRole('tab', { name: 'People data', exact: true }).click();
   await admin.getByLabel('CSV file').setInputFiles({ name: 'bad.csv', mimeType: 'text/csv', buffer: Buffer.from('NAME,CITY\nA,B\n') });
   await admin.getByRole('button', { name: 'Check the file' }).click();
   await admin.getByText(/missing the columns FIRST, LAST, ADDRESS/).waitFor();
@@ -436,7 +446,7 @@ try {
   await admin.getByText('Newly cured').waitFor();
   expect(
     'admin columns',
-    /^New people1/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    /^New people1/.test((await dataPanel.locator('.tiles').first().textContent()) ?? ''),
     'the matched columns did not read',
   );
   await check(admin, 'admin columns matched');
@@ -451,14 +461,14 @@ try {
   await admin.getByText('Possible matches').waitFor();
   expect(
     'admin matches',
-    /^New people1/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    /^New people1/.test((await dataPanel.locator('.tiles').first().textContent()) ?? ''),
     'the corrected name should look like a new person',
   );
   await admin.getByLabel(/Newt Newman and Newt Newmann are the same person/i).check();
   await admin.getByText(/^New people0/).waitFor();
   expect(
     'admin matches',
-    /Newly cured0/.test((await admin.locator('.tiles').first().textContent()) ?? ''),
+    /Newly cured0/.test((await dataPanel.locator('.tiles').first().textContent()) ?? ''),
     'marked as the same person, nobody is cured',
   );
   expect(
@@ -469,10 +479,12 @@ try {
   await check(admin, 'admin possible matches');
 
   // Find someone and move them; the audit log shows it.
+  await admin.getByRole('tab', { name: 'Overview', exact: true }).click();
   await admin.getByLabel('Name, street or phone').fill('newman');
   const row = admin.getByRole('row', { name: /Newt Newman/ });
   await row.getByRole('combobox').selectOption({ label: 'Ada Admin' });
   await admin.getByText(/Newt Newman now belongs to Ada Admin/).waitFor();
+  await admin.getByRole('tab', { name: 'Settings and log', exact: true }).click();
   await admin
     .getByRole('cell', { name: /moved from the pool to Ada Admin/ })
     .first()
@@ -498,7 +510,9 @@ try {
   expect('organizer', refused?.status() === 403, `the admin page answered ${refused?.status()} before a grant`);
   await admin.setViewportSize({ width: 1280, height: 800 });
   await admin.goto(`${base}/admin/`);
+  await admin.getByRole('tab', { name: 'Access', exact: true }).click();
   await admin.getByRole('heading', { name: 'Who organizes precincts' }).waitFor();
+  await admin.getByRole('tab', { name: 'Overview', exact: true }).click();
   await check(admin, 'admin: who organizes');
   // The list of "Move all open people to" floats over the page: it does not make its row or the table any bigger.
   const moveTo = admin.getByLabel(/^Move everyone .* has open to$/).first();
@@ -521,6 +535,7 @@ try {
   );
   await moveTo.press('Escape');
 
+  await admin.getByRole('tab', { name: 'Access', exact: true }).click();
   await admin.getByRole('button', { name: 'Change what Olive Organizer organizes' }).click();
   await check(admin, 'admin: change what a volunteer organizes');
   // Precincts are picked from the district's list, one at a time, and show as buttons that take one away.
@@ -540,6 +555,7 @@ try {
   await organizer.goto(`${base}/`);
   await organizer.getByRole('link', { name: 'Admin', exact: true }).click();
   await organizer.getByRole('heading', { name: 'Where things stand' }).waitFor();
+  expect('organizer', (await organizer.getByRole('tab').count()) === 2, 'an organizer should have two tabs');
   await organizer.getByRole('heading', { name: 'Find someone and move them' }).waitFor();
   for (const only of ['Upload the state’s sheet', 'Who organizes precincts', 'Audit log', 'Unsuccessful cures'])
     expect('organizer', (await organizer.getByRole('heading', { name: only }).count()) === 0, `${only} is shown to an organizer`);
@@ -605,7 +621,7 @@ try {
   const darkAdminPage = await darkAdmin.newPage();
   watch(darkAdminPage, 'dark admin');
   await darkAdminPage.goto(`${base}/admin/`);
-  await darkAdminPage.getByRole('heading', { name: 'Audit log' }).waitFor();
+  await darkAdminPage.getByRole('heading', { name: 'Where things stand' }).waitFor();
   await check(darkAdminPage, 'admin (dark)');
 
   // Start over: the dialog asks first, Keep them changes nothing, and the second time everything goes.
@@ -613,6 +629,7 @@ try {
   const before = peopleCount();
   expect('reset', before > 0, 'there are no voters to reset');
   const dialog = darkAdminPage.getByRole('alertdialog');
+  await darkAdminPage.getByRole('tab', { name: 'Settings and log', exact: true }).click();
   await darkAdminPage.getByRole('button', { name: 'Delete all voters' }).click();
   await dialog.waitFor();
   await check(darkAdminPage, 'admin reset dialog (dark)');
@@ -623,6 +640,7 @@ try {
   await dialog.getByRole('button', { name: 'Delete all voters' }).click();
   await darkAdminPage.getByText(/Deleted \d+ voters and \d+ notes?\./).waitFor();
   expect('reset', peopleCount() === 0, 'the voters were not deleted');
+  await darkAdminPage.getByRole('tab', { name: 'Overview', exact: true }).click();
   await darkAdminPage.getByText('Nothing has been uploaded yet.').waitFor();
   await check(darkAdminPage, 'admin after reset (dark)');
   await darkAdmin.close();

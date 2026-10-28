@@ -1369,12 +1369,53 @@ if (me && !me.isAdmin && !me.organizes) {
     }
   }
 
+  // The page is four tabs, so each job has its own screen. An organizer sees the first two, with only the parts that are theirs.
+  const TABS: { id: string; label: string; admin: boolean; parts: (keyof typeof sections)[] }[] = [
+    { id: 'overview', label: 'Overview', admin: false, parts: ['stats', 'notices', 'flagged', 'volunteers', 'find'] },
+    { id: 'data', label: 'People data', admin: false, parts: ['upload', 'geocode', 'exported'] },
+    { id: 'access', label: 'Access', admin: true, parts: ['organizers', 'invites'] },
+    { id: 'system', label: 'Settings and log', admin: true, parts: ['settings', 'reset', 'audit'] },
+  ];
+  const tabs = TABS.filter((t) => siteAdmin || !t.admin);
+  const tabButton = (id: string): HTMLElement => $(`#tab-${id}`);
+  function tabsView(): HTMLElement {
+    const list = h(
+      'div',
+      { class: 'fl-tabs', role: 'tablist', 'aria-label': 'Admin sections' },
+      ...tabs.map((t, i) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'tab',
+            id: `tab-${t.id}`,
+            'aria-controls': `panel-${t.id}`,
+            'aria-selected': i === 0 ? 'true' : 'false',
+          },
+          t.label,
+        ),
+      ),
+    );
+    const panels = tabs.map((t) =>
+      h(
+        'div',
+        { class: 'fl-stack fl-stack--8', role: 'tabpanel', id: `panel-${t.id}`, 'aria-labelledby': `tab-${t.id}`, hidden: true },
+        ...t.parts.filter((part) => siteAdmin || (part !== 'upload' && part !== 'geocode')).map((part) => sections[part]),
+      ),
+    );
+    return h('div', { class: 'fl-stack fl-stack--8' }, list, ...panels);
+  }
+
   try {
-    const shown = siteAdmin
-      ? Object.values(sections)
-      : [sections.stats, sections.notices, sections.flagged, sections.volunteers, sections.find, sections.exported];
     if (!siteAdmin) $('.lead').textContent = 'Check on volunteers and move the people of your precincts around.';
-    clear(app, ...shown);
+    clear(app, tabsView());
+    // The tab is in the address (#data), so a reload or a shared link comes back to the same screen.
+    const fromAddress = tabs.find((t) => `#${t.id}` === location.hash);
+    const start = tabs.find((t) => t.id === 'overview');
+    window.Frostline.tabs($('.fl-tabs'), {
+      onChange: (tab) => history.replaceState(null, '', tab.id === 'tab-overview' ? location.pathname : `#${tab.id.replace('tab-', '')}`),
+    });
+    if (fromAddress && fromAddress !== start) tabButton(fromAddress.id).click();
     if (siteAdmin) uploadSection();
     await refresh();
   } catch (e) {
