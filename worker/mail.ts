@@ -80,3 +80,30 @@ export async function sendAssignmentNotice(
     return false;
   }
 }
+
+// Where feedback from the site goes: the address the other emails are sent from, which reaches the person who runs the tool.
+export const FEEDBACK_TO = 'admin@azld8cures.com';
+
+// Emails a volunteer's feedback to FEEDBACK_TO. Replies go to the volunteer. `page` is the path they were on. Returns whether it went out; a
+// failure is logged, and the page tells the volunteer to try again.
+export async function sendFeedback(mailer: Mailer, by: Assigner, page: string, message: string): Promise<boolean> {
+  const who = by.name === '' ? by.email : `${by.name} (${by.email})`;
+  const where = page === '' ? 'unknown' : page;
+  try {
+    await mailer.send({
+      from: FROM,
+      to: FEEDBACK_TO,
+      replyTo: by.email,
+      subject: `Cure tracker feedback from ${by.name === '' ? by.email : by.name}`,
+      text: `From: ${who}\nPage: ${where}\n\n${message}\n`,
+      html: emailShell(
+        `<p style="margin:0 0 8px"><strong>${escapeHtml(who)}</strong> sent feedback from <code>${escapeHtml(where)}</code>:</p>
+<p style="margin:16px 0 0;white-space:pre-wrap">${escapeHtml(message)}</p>`,
+      ),
+    });
+    return true;
+  } catch (e) {
+    console.error('feedback email failed', e instanceof Error ? e.message : e);
+    return false;
+  }
+}
