@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Send feedback</title>
+    <meta name="description" content="Tell us what is confusing, broken or missing in the cure tracker.">
+    <meta name="theme-color" content="#1f497d">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <script src="/js/theme.js"></script>
+    <link rel="stylesheet" href="/tokens.css">
+    <link rel="stylesheet" href="/frostline/1.11/components/bundle.css">
+    <link rel="stylesheet" href="/app.css">
+    <link rel="preload" href="/fonts/PublicSans-Variable-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <script src="/frostline/1.11/components/bundle.js" defer></script>
+  </head>
+  <body>
+    <a class="fl-skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-header__in">
+        <a class="site-header__brand" href="/">
+          <img class="logo logo--light" src="/img/ld8-dems-logo.webp" alt="Arizona LD8 Democrats" width="602" height="151">
+          <img
+            class="logo logo--dark"
+            src="/img/ld8-dems-logo-dark.webp"
+            alt="Arizona LD8 Democrats"
+            width="602"
+            height="151"
+            loading="lazy"
+          >
+        </a>
+        <nav aria-label="Primary">
+          <ul class="nav">
+            <li><a href="/">My people</a></li>
+            <li><a href="/pool/">Find people</a></li>
+            <li><a href="/map/">Map</a></li>
+            <li id="nav-admin" hidden><a href="/admin/">Admin</a></li>
+            <li>
+              <details class="account" id="account">
+                <summary id="who">Account</summary>
+                <div class="account__panel">
+                  <div class="fl-field">
+                    <label class="fl-label" for="theme">Theme</label>
+                    <select class="fl-select" id="theme" data-fl-theme>
+                      <option value="auto">Auto</option>
+                      <option value="light">Light</option>
+                      <option value="dark">Dark</option>
+                    </select>
+                  </div>
+                  <a href="/feedback/">Send feedback</a>
+                  <a href="/cdn-cgi/access/logout">Sign out</a>
+                </div>
+              </details>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <main id="main" class="fl-page page fl-stack fl-stack--8">
+      <div class="fl-stack fl-stack--3">
+        <p class="kicker">Ballot curing</p>
+        <h1>Send feedback</h1>
+        <p class="lead">
+          Something confusing, broken or missing? Tell us. Your message goes to the person who runs this site, and they can reply to you by
+          email.
+        </p>
+      </div>
+      <div id="app" class="fl-stack fl-stack--8"><p class="fl-help">Loading…</p></div>
+    </main>
+    <script type="module" src="/js/feedback.js"></script>
+  </body>
+</html>

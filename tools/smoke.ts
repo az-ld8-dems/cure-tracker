@@ -15,7 +15,7 @@ import { webkitQuirks } from './lib/webkit-quirks.ts';
 
 // Every page links the vendored Frostline's versioned folder: the version in the HTML must be the one that is built.
 const frostline = readFileSync(new URL('../vendor/frostline/VERSION', import.meta.url), 'utf8').trim();
-for (const file of ['index.html', 'pool/index.html', 'map/index.html', 'admin/index.html', '404.html']) {
+for (const file of ['index.html', 'pool/index.html', 'map/index.html', 'admin/index.html', 'feedback/index.html', '404.html']) {
   const html = readFileSync(new URL(`../public/${file}`, import.meta.url), 'utf8');
   const linked = new Set([...html.matchAll(/\/frostline\/([\d.]+)\//g)].map((m) => m[1]));
   if (linked.size !== 1 || !linked.has(frostline)) {
@@ -559,7 +559,7 @@ try {
   // ---- dark mode: a new volunteer's welcome, then the pages with data on them
   const dora = await context('dora@example.com', { dark: true, phone: true });
   const doraPage = await dora.newPage();
-  watch(doraPage, 'dark volunteer');
+  watch(doraPage, 'dark volunteer', [503]); // the feedback page's refusal: the dev server has no mail set up
   await doraPage.goto(`${base}/`);
   await doraPage.getByLabel('Your name').waitFor();
   expect('dark', await doraPage.locator('.logo--dark').isVisible(), 'the dark logo is not shown in a dark browser');
@@ -590,6 +590,12 @@ try {
   await doraPage.goto(`${base}/map/`);
   await mapDrawn(doraPage, 'map (dark)');
   await check(doraPage, 'map (dark)');
+  // Feedback: the page loads, passes the checks, and (the dev server has no mail set up) says plainly that it cannot send.
+  await doraPage.goto(`${base}/feedback/`);
+  await doraPage.getByLabel('What would you like to tell us?').fill('The Claim button did nothing');
+  await check(doraPage, 'feedback (dark)');
+  await doraPage.getByRole('button', { name: 'Send feedback' }).click();
+  await doraPage.getByText(/Feedback cannot be sent right now/).waitFor();
   await doraPage.goto(`${base}/`);
   await doraPage.locator('.people > li').first().waitFor();
   await check(doraPage, 'my people (dark)');

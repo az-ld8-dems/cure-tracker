@@ -52,6 +52,7 @@ assert.equal(say('volunteer.join'), 'signed in for the first time');
 assert.equal(say('notify.send', { volunteer: 1, count: 3 }), 'emailed Vera Vale about 3 new people');
 assert.equal(say('export.worked', { people: 3 }), 'downloaded the CSV of 3 people volunteers have worked on');
 assert.equal(say('invite.remove', { email: 'a@example.com' }), 'took a@example.com off the invited list');
+assert.equal(say('feedback.send'), 'sent feedback by email');
 assert.equal(say('invite.send', { email: 'a@example.com' }), 'emailed sign-in instructions to a@example.com');
 assert.equal(say('volunteer.rename', { from: '', to: 'Vera Vale' }), 'now called Vera Vale');
 assert.equal(say('something.new'), 'something new', 'an action nobody wrote words for is still readable');
