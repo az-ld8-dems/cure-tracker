@@ -84,6 +84,10 @@ npx wrangler r2 object put cure-tracker-tiles/ld8.pmtiles --file ld8.pmtiles --c
 
 4. Reload the Map page: the street map shows. Write the build date, the box and the file's size in `vendor/README.md`. To replace the file later, run step 3 again; browsers keep the old one for up to a day.
 
+## 8. Email for assignments (optional)
+
+When an organizer assigns a voter, the volunteer gets an email from `admin@azld8cures.com` (`worker/mail.ts`). The Worker has a `send_email` binding called `EMAIL` (`wrangler.jsonc`). By hand, in the Cloudflare dashboard for the `azld8cures.com` zone: **Email, Email Sending** (Cloudflare's email service), onboard the domain for sending and add the DNS records it asks for (SPF, DKIM, DMARC). Until that is done, sends fail, are logged, and assigning still works. Check it: as an organizer assign a test person to a second volunteer whose inbox you can read, and look for the message (and the spam folder the first time). Volunteers need no verification: a volunteer exists only after signing in through Access, which has already proved their address. Apply migration 0013 (`npm run db:migrate`) before deploying.
+
 ## Backups
 
 There are none on purpose. D1 Time Travel keeps 30 days of history and restores to any minute:

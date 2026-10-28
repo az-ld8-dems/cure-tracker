@@ -26,6 +26,7 @@ import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
+import { type Mailer, notifyAssigned } from './mail.ts';
 import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import { allGrants, type Grant, inScope, parseGrant, replaceGrant, type Scope, scopeOf, scopeWhere } from './organizers.ts';
@@ -59,6 +60,8 @@ export interface ApiContext {
   fetcher: typeof fetch;
   // Whether the map's tile file is in place (worker/tiles.ts). Optional: without it the map has no basemap.
   tilesReady?: () => Promise<boolean>;
+  // Sends the "you were assigned someone" email (worker/mail.ts). Optional: without it nobody is emailed.
+  mailer?: Mailer | undefined;
 }
 
 interface Ctx {
@@ -73,6 +76,9 @@ interface Ctx {
   today: string;
   fetcher: typeof fetch;
   tilesReady: () => Promise<boolean>;
+  mailer: Mailer | undefined;
+  origin: string;
+  at: Date;
 }
 
 type Body = Record<string, unknown>;
@@ -923,11 +929,13 @@ async function assign(c: Ctx, p: string[], body: Body): Promise<Response> {
   const row = await personRow(c, id);
   mayOrganize(c, row);
   if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
-  if (to !== null) await volunteerById(c, to);
+  const target = to === null ? null : await volunteerById(c, to);
   await c.db.batch([
     c.db.prepare('UPDATE people SET assigned_to = ?, updated_at = ? WHERE id = ?').bind(to, c.now, id),
     auditStmt(c, 'assign', id, { from: row.assigned_to, to }),
   ]);
+  // Tell the volunteer, unless they assigned themselves or already had this person.
+  if (target && target.id !== c.me.id && row.assigned_to !== target.id) await notifyAssigned(c.db, c.mailer, target, c.me, c.origin, c.at);
   return json(toPerson(await personRow(c, id), c.today));
 }
 
@@ -1148,6 +1156,9 @@ export async function handleApi(request: Request, api: ApiContext): Promise<Resp
       today: arizonaDate(now),
       fetcher: api.fetcher,
       tilesReady: api.tilesReady ?? (async () => false),
+      mailer: api.mailer,
+      origin: url.origin,
+      at: now,
     };
     const m = route.pattern.exec(url.pathname);
     return await route.handler(ctx, m?.slice(1) ?? [], body, url);

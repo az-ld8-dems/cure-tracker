@@ -4,6 +4,7 @@ import {
   $,
   addressText,
   api,
+  assignBox,
   banner,
   boot,
   clear,
@@ -12,6 +13,8 @@ import {
   field,
   flagBadge,
   h,
+  loadVolunteers,
+  mayOrganize,
   personName,
   phoneHref,
   plural,
@@ -31,6 +34,9 @@ if (me) {
   // The people loaded so far, and whether there are more after them.
   let people: Person[] = [];
   let hasMore = false;
+  // Who an organizer can assign people to (everyone but themselves), and whether the list has the assign column at all.
+  const assignees = me.organizes ? [...(await loadVolunteers()).values()].filter((v) => v.id !== me.id) : [];
+  const organizes = me.organizes !== null;
 
   // Three headers sort the table: a click asks for that sort, a second click runs it the other way, and the active one says which way it
   // runs (aria-sort). The "Sort by" select does the same on a phone and stays in step, except that it only picks the natural direction.
@@ -120,6 +126,7 @@ if (me) {
           awayHead,
           head('Reason'),
           h('th', { scope: 'col' }, h('span', { class: 'fl-sr-only' }, 'Claim')),
+          organizes ? h('th', { scope: 'col' }, 'Assign') : null,
         ),
       ),
       tbody,
@@ -196,6 +203,14 @@ if (me) {
       'Claim',
     );
 
+  // Gives the person to a volunteer; they leave the pool, so the list drops them.
+  const assignedAway = async (p: Person): Promise<void> => {
+    people = people.filter((x) => x.id !== p.id);
+    if (people.length === 0 && hasMore) await reload(true);
+    else render();
+  };
+  const assignCell = (p: Person): HTMLElement | null => (mayOrganize(me, p.precinct) ? assignBox(p, assignees, assignedAway) : null);
+
   const phoneLink = (p: Person): Node | string => (p.phone ? h('a', { href: phoneHref(p.phone) }, p.phone) : 'None');
 
   // A name, with badges under it for what is unusual: everyone in the pool starts as "needs to be contacted", so that one is left out.
@@ -221,6 +236,7 @@ if (me) {
       h('td', { class: 'fl-nowrap', hidden: !filters.searchingByDistance() }, awayText(p)),
       h('td', {}, p.reasonCode ? titleCase(p.reasonCode) : ''),
       h('td', {}, claimButton(p)),
+      organizes ? h('td', {}, assignCell(p)) : null,
     );
   }
 
@@ -233,6 +249,7 @@ if (me) {
       h('p', {}, addressText(p.address)),
       h('p', { class: 'fl-help' }, meta, p.phone ? ' · ' : '', p.phone ? phoneLink(p) : null),
       claimButton(p),
+      assignCell(p),
     );
   }
 

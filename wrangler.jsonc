@@ -32,6 +32,9 @@
   // The map's tiles: one PMTiles file in this bucket, served by the Worker behind Access (worker/tiles.ts). The bucket has to exist before
   // the next deploy, or the deploy fails: `npx wrangler r2 bucket create cure-tracker-tiles` (docs/setup.md).
   "r2_buckets": [{ "binding": "TILES", "bucket_name": "cure-tracker-tiles" }],
+  // Sends the "someone assigned you a voter" email from admin@azld8cures.com (worker/mail.ts). The domain has to be set up for sending first
+  // (docs/setup.md); until then a send fails, is logged, and the assignment still goes through. The binding is env.EMAIL.
+  "send_email": [{ "name": "EMAIL" }],
   // The admins' emails are a secret, not a variable, so they are not in git and changing them needs no deploy:
   //   npx wrangler secret put ADMIN_EMAILS      (paste the emails, comma-separated; it applies right away)
   // Listed here so `wrangler types` knows about it. While it is missing nobody is an admin (docs/setup.md).
