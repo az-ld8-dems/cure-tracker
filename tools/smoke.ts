@@ -488,7 +488,7 @@ try {
   await organizer.goto(`${base}/`);
   await organizer.getByLabel('Your name').fill('Olive Organizer');
   await organizer.getByRole('button', { name: 'Continue' }).click();
-  await organizer.getByRole('link', { name: 'Find people to call' }).waitFor();
+  await organizer.getByRole('link', { name: 'Find people to contact' }).waitFor();
   expect(
     'organizer',
     !(await organizer.getByRole('link', { name: 'Admin', exact: true }).isVisible()),
