@@ -315,3 +315,31 @@ export interface OrganizerList {
   // The volunteers who are site admins: they organize everything, with or without a grant.
   siteAdmins: number[];
 }
+
+// Someone an admin emailed sign-in instructions to. `signed_in`: they have an account now. `waiting`: the message went out and they have not
+// signed in yet. `not_sent`: the send failed, so they were not told.
+export type InviteStatus = 'signed_in' | 'waiting' | 'not_sent';
+
+export interface Invite {
+  id: number;
+  email: string;
+  invitedBy: string;
+  invitedAt: string;
+  lastSentAt: string | null;
+  sentCount: number;
+  status: InviteStatus;
+}
+
+export interface InviteList {
+  invites: Invite[];
+  // Whether the Worker can send email at all (the EMAIL binding).
+  emailReady: boolean;
+}
+
+// What happened to each address an admin pasted.
+export interface InviteResult {
+  sent: string[];
+  failed: string[];
+  skipped: { email: string; why: 'has_account' | 'too_soon' }[];
+  rejected: string[];
+}

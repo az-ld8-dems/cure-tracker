@@ -9,6 +9,9 @@ import type {
   ColumnMap,
   ColumnPick,
   GeocodeProgress,
+  InviteList,
+  InviteResult,
+  InviteStatus,
   OrganizerGrant,
   OrganizerList,
   PeoplePage,
@@ -70,6 +73,7 @@ if (me && !me.isAdmin && !me.organizes) {
     geocode: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-geocode' }),
     flagged: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-flagged' }),
     volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
+    invites: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-invites' }),
     find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
     organizers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-organizers' }),
     reset: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-reset' }),
@@ -380,6 +384,124 @@ if (me && !me.isAdmin && !me.organizes) {
         h('button', { class: 'btn', type: 'submit' }, 'Save'),
       ),
     );
+  }
+
+  // ---- invite people who have no account yet
+  const INVITE_BADGES: Record<InviteStatus, [string, string]> = {
+    signed_in: ['fl-badge fl-badge--success', 'Signed in'],
+    waiting: ['fl-badge fl-badge--warning', 'Waiting for them to sign in'],
+    not_sent: ['fl-badge fl-badge--danger', 'Email not sent'],
+  };
+  function invitesSection(list: InviteList): void {
+    const emails = h('textarea', {
+      class: 'fl-textarea',
+      id: 'invite-emails',
+      rows: '4',
+      autocomplete: 'off',
+      spellcheck: 'false',
+      placeholder: 'ada@example.com\nbob@example.com',
+    });
+    const resultBox = h('div', { class: 'fl-stack fl-stack--2', role: 'status' });
+    const send = async (path: string, body: unknown): Promise<void> => {
+      try {
+        const r = await api<InviteResult>('POST', path, body);
+        const lines = [
+          r.sent.length > 0 ? `Sent to ${plural(r.sent.length, 'person', 'people')}.` : '',
+          r.failed.length > 0 ? `Could not send to ${r.failed.join(', ')}. Try again later.` : '',
+          ...r.skipped.map((x) =>
+            x.why === 'has_account' ? `${x.email} already has an account.` : `${x.email} was emailed a few minutes ago.`,
+          ),
+          r.rejected.length > 0 ? `Not an email address: ${r.rejected.join(', ')}.` : '',
+        ].filter((l) => l !== '');
+        clear(resultBox, ...lines.map((l) => h('p', {}, l)));
+        if (r.sent.length > 0) emails.value = '';
+        await reloadInvites();
+      } catch (e) {
+        toast(failureText(e), 'error');
+      }
+    };
+    const waiting = list.invites.filter((i) => i.status !== 'signed_in');
+    clear(
+      sections.invites,
+      heading('h-invites', 'Invite volunteers'),
+      list.emailReady
+        ? null
+        : banner('warn', h('p', {}, 'Email is not set up yet, so invitations cannot be sent (docs/setup.md, section 8).')),
+      h(
+        'form',
+        {
+          class: 'fl-card fl-stack fl-stack--3',
+          onsubmit: (event) => {
+            event.preventDefault();
+            void send('/api/admin/invites', { emails: emails.value });
+          },
+        },
+        h(
+          'p',
+          { class: 'fl-help' },
+          'Each person gets an email with step-by-step instructions for signing in. Add their addresses to the Cloudflare Access policy first: the site turns away anyone who is not on it, and sending does not add them.',
+        ),
+        field('invite-emails', 'Email addresses, one per line or separated by commas', emails),
+        h('button', { class: 'btn', type: 'submit', disabled: !list.emailReady }, 'Send invitations'),
+        resultBox,
+      ),
+      list.invites.length === 0
+        ? h('p', { class: 'fl-help' }, 'Nobody has been invited yet.')
+        : h(
+            'div',
+            { class: 'fl-stack fl-stack--3' },
+            table(
+              'People invited',
+              ['Email', 'Status', 'Invited by', 'Last sent', h('span', { class: 'fl-sr-only' }, 'Send again')],
+              list.invites.map((i) => {
+                const [badgeClass, badgeText] = INVITE_BADGES[i.status];
+                return [
+                  i.email,
+                  h('span', { class: badgeClass }, badgeText),
+                  i.invitedBy,
+                  i.lastSentAt ? dateTime(i.lastSentAt) : 'Never',
+                  i.status === 'signed_in'
+                    ? ''
+                    : h(
+                        'button',
+                        {
+                          class: 'fl-btn fl-btn--sm',
+                          type: 'button',
+                          'aria-label': `Send instructions again to ${i.email}`,
+                          onclick: () => void send(`/api/admin/invites/${i.id}/resend`, {}),
+                        },
+                        'Send again',
+                      ),
+                ];
+              }),
+            ),
+            waiting.length === 0
+              ? null
+              : h(
+                  'div',
+                  { class: 'fl-cluster' },
+                  h(
+                    'button',
+                    {
+                      class: 'fl-btn',
+                      type: 'button',
+                      onclick: async () => {
+                        try {
+                          await navigator.clipboard.writeText(waiting.map((i) => i.email).join('\n'));
+                          toast(`Copied ${plural(waiting.length, 'address', 'addresses')} for the Access policy.`);
+                        } catch {
+                          toast('Could not copy. Select the addresses in the table instead.', 'error');
+                        }
+                      },
+                    },
+                    'Copy addresses not signed in yet',
+                  ),
+                ),
+          ),
+    );
+  }
+  async function reloadInvites(): Promise<void> {
+    invitesSection(await api<InviteList>('GET', '/api/admin/invites'));
   }
 
   // ---- who organizes which precincts
@@ -1060,19 +1182,21 @@ if (me && !me.isAdmin && !me.organizes) {
   }
 
   async function refresh(): Promise<void> {
-    const [stats, vols, firstPage, settings, organizers] = await Promise.all([
+    const [stats, vols, firstPage, settings, organizers, invites] = await Promise.all([
       api<AdminStats>('GET', '/api/admin/stats'),
       loadVolunteers(),
       siteAdmin ? api<AuditEntry[]>('GET', '/api/admin/audit?limit=50') : null,
       siteAdmin ? api<AdminSettings>('GET', '/api/admin/settings') : null,
       siteAdmin ? api<OrganizerList>('GET', '/api/admin/organizers') : null,
+      siteAdmin ? api<InviteList>('GET', '/api/admin/invites') : null,
     ]);
     volunteers = vols;
     statsSection(stats);
     flaggedSection(stats);
     volunteersSection(stats);
     findSection();
-    if (firstPage && settings && organizers) {
+    if (firstPage && settings && organizers && invites) {
+      invitesSection(invites);
       log = firstPage;
       organizerList = organizers;
       settingsSection(settings);

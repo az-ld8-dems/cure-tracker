@@ -8,6 +8,9 @@ import type {
   AuditEntry,
   ColumnPick,
   ContactMethod,
+  Invite,
+  InviteList,
+  InviteResult,
   Me,
   MergePair,
   Note,
@@ -26,6 +29,7 @@ import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
+import { invite, MAX_PER_REQUEST, parseEmails } from './invites.ts';
 import { type Mailer, notifyAssigned } from './mail.ts';
 import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
@@ -975,6 +979,61 @@ async function reassignAll(c: Ctx, p: string[], body: Body): Promise<Response> {
   return json({ moved: res.meta.changes });
 }
 
+// ---- inviting people who have no account yet (worker/invites.ts)
+async function listInvites(c: Ctx): Promise<Response> {
+  const { results } = await c.db
+    .prepare(
+      `SELECT i.id, i.email, i.invited_by, i.invited_at, i.last_sent_at, i.sent_count, v.id AS volunteer
+       FROM invites i LEFT JOIN volunteers v ON v.email = i.email ORDER BY i.invited_at DESC, i.id DESC`,
+    )
+    .all<{
+      id: number;
+      email: string;
+      invited_by: string;
+      invited_at: string;
+      last_sent_at: string | null;
+      sent_count: number;
+      volunteer: number | null;
+    }>();
+  const invites: Invite[] = results.map((r) => ({
+    id: r.id,
+    email: r.email,
+    invitedBy: r.invited_by,
+    invitedAt: r.invited_at,
+    lastSentAt: r.last_sent_at,
+    sentCount: r.sent_count,
+    status: r.volunteer !== null ? 'signed_in' : r.last_sent_at === null ? 'not_sent' : 'waiting',
+  }));
+  const list: InviteList = { invites, emailReady: c.mailer !== undefined };
+  return json(list);
+}
+
+async function sendInvites(c: Ctx, emails: string[], rejected: string[]): Promise<Response> {
+  if (!c.mailer) throw new HttpError(503, 'Email is not set up yet (docs/setup.md, section 8)');
+  const result: InviteResult = { sent: [], failed: [], skipped: [], rejected };
+  for (const email of emails) {
+    const outcome = await invite(c.db, c.mailer, email, c.me, c.origin, c.at);
+    if (outcome === 'sent') result.sent.push(email);
+    else if (outcome === 'failed') result.failed.push(email);
+    else result.skipped.push({ email, why: outcome });
+  }
+  if (result.sent.length > 0) await c.db.batch(result.sent.map((email) => auditStmt(c, 'invite.send', null, { email })));
+  return json(result);
+}
+
+async function postInvites(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  const parsed = parseEmails(text(body, 'emails', 20_000));
+  if (parsed.emails.length === 0) throw new HttpError(400, 'No email addresses found');
+  if (parsed.emails.length > MAX_PER_REQUEST) throw new HttpError(400, `Invite at most ${MAX_PER_REQUEST} people at a time`);
+  return sendInvites(c, parsed.emails, parsed.rejected);
+}
+
+async function resendInvite(c: Ctx, p: string[]): Promise<Response> {
+  const row = await c.db.prepare('SELECT email FROM invites WHERE id = ?').bind(idOf(p[0])).first<{ email: string }>();
+  if (!row) throw new HttpError(404, 'No such invite');
+  return sendInvites(c, [row.email], []);
+}
+
 // Who organizes what, for the admin page: every volunteer's grant, and the precincts the open people are in (to spot a grant that no longer matches).
 async function listOrganizers(c: Ctx): Promise<Response> {
   const grants = await allGrants(c.db);
@@ -1081,6 +1140,9 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/uploads$/, level: 'admin', handler: adminUploads },
   { method: 'GET', pattern: /^\/api\/admin\/organizers$/, level: 'admin', handler: listOrganizers },
   { method: 'PUT', pattern: /^\/api\/admin\/volunteers\/(\d+)\/organizer$/, level: 'admin', handler: setOrganizer },
+  { method: 'GET', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: listInvites },
+  { method: 'POST', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: postInvites },
+  { method: 'POST', pattern: /^\/api\/admin\/invites\/(\d+)\/resend$/, level: 'admin', handler: resendInvite },
   { method: 'GET', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: getSettings },
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/reset$/, level: 'admin', handler: reset },
