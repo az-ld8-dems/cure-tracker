@@ -73,6 +73,8 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
       return `emailed ${volunteer(d.volunteer)} about ${count(d.count, 'new person', 'new people')}`;
     case 'invite.send':
       return `emailed sign-in instructions to ${String(d.email)}`;
+    case 'invite.remove':
+      return `took ${String(d.email)} off the invited list`;
     case 'volunteer.join':
       return 'signed in for the first time';
     case 'volunteer.rename':
