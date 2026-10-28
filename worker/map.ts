@@ -35,30 +35,30 @@ export async function pinsIn(
   const extra = narrow.where.map((w) => ` AND ${w}`).join('');
   const { results } = await db
     .prepare(
-      `SELECT p.id, p.lat, p.lon, p.approximate FROM people p
+      `SELECT p.id, p.lat, p.lon, (p.approximate = 1 OR p.placed_by IS NOT NULL) AS guess FROM people p
        WHERE p.assigned_to IS NULL AND p.status != 'cured' AND p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?${extra}
        ORDER BY p.lat, p.lon LIMIT ?`,
     )
     .bind(box.south, box.north, box.west, box.east, ...narrow.binds, MAX_PINS + 1)
-    .all<{ id: number; lat: number; lon: number; approximate: number }>();
-  const pool = results.slice(0, MAX_PINS).map((r): Pin => [r.id, r.lat, r.lon, r.approximate ? 1 : 0, 0]);
+    .all<{ id: number; lat: number; lon: number; guess: number }>();
+  const pool = results.slice(0, MAX_PINS).map((r): Pin => [r.id, r.lat, r.lon, r.guess ? 1 : 0, 0]);
 
   // The last thing a person did for the claim: the claim itself, a status change, a note or a move. (An upload's own rows and the
   // geocoder do not count; they say nothing about the volunteer.)
   const claimed = await db
     .prepare(
-      `SELECT p.id, p.lat, p.lon, p.approximate,
+      `SELECT p.id, p.lat, p.lon, (p.approximate = 1 OR p.placed_by IS NOT NULL) AS guess,
          (SELECT MAX(a.at) FROM audit a WHERE a.person_id = p.id AND a.action IN ('claim', 'assign', 'reassign', 'status', 'note')) AS last_at
        FROM people p
        WHERE p.assigned_to IS NOT NULL AND p.status != 'cured' AND p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?${extra}
        ORDER BY p.lat, p.lon LIMIT ?`,
     )
     .bind(box.south, box.north, box.west, box.east, ...narrow.binds, MAX_PINS + 1)
-    .all<{ id: number; lat: number; lon: number; approximate: number; last_at: string | null }>();
+    .all<{ id: number; lat: number; lon: number; guess: number; last_at: string | null }>();
   const cutoff = Date.parse(now) - STALLED_DAYS * 86_400_000;
   const held = claimed.results.slice(0, MAX_PINS).map((r): Pin => {
     const stalled = r.last_at !== null && Date.parse(r.last_at) < cutoff;
-    return [r.id, r.lat, r.lon, r.approximate ? 1 : 0, stalled ? 2 : 1];
+    return [r.id, r.lat, r.lon, r.guess ? 1 : 0, stalled ? 2 : 1];
   });
   return { pins: [...pool, ...held], more: results.length > MAX_PINS || claimed.results.length > MAX_PINS };
 }

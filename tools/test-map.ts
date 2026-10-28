@@ -118,6 +118,12 @@ assert.deepEqual(
 );
 assert.equal(whole.tiles, false, 'no tile file is in place yet');
 
+// a place set by hand is still drawn as a guess
+const handId = open.find((p) => p.approximate === 0)?.id ?? 0;
+sqlite.prepare("UPDATE people SET placed_by = 'boss@example.com' WHERE id = ?").run(handId);
+assert.equal((await pins(WHOLE)).pins.find((p) => p[0] === handId)?.[3], 1, 'by hand is shown as a guess');
+sqlite.prepare('UPDATE people SET placed_by = NULL WHERE id = ?').run(handId);
+
 // a smaller box holds exactly the people inside it
 const mid = { south: 33.4, north: 33.5, west: -112.1, east: -111.95 };
 const small = await pins(`west=${mid.west}&south=${mid.south}&east=${mid.east}&north=${mid.north}`);
