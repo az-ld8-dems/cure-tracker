@@ -171,6 +171,31 @@ assert.deepEqual(
 );
 assert.equal(list.people.find((p) => p.name === 'Nora Nowhere')?.address, '1 NOWHERE LN TEMPE, AZ 85281');
 assert.equal(list.next, null);
+// a Non_Exact match is a guess that can land far off, so it is on the list too (reason 'rough'), can be found by name, and stays once placed by hand
+const roughId = Number(sqlite.prepare("SELECT id FROM people WHERE geocode = 'match' AND approximate = 0 ORDER BY id LIMIT 1").get()?.id);
+sqlite.prepare('UPDATE people SET approximate = 1 WHERE id = ?').run(roughId);
+const roughName = sqlite.prepare('SELECT first_name, last_name FROM people WHERE id = ?').get(roughId);
+const withRough = (await call(admin, 'GET', '/api/admin/geocode/unplaced')).data as UnplacedPage;
+assert.equal(withRough.people.find((p) => p.id === roughId)?.reason, 'rough');
+assert.equal(withRough.people.length, list.people.length + 1);
+assert.equal((await stats()).geocode.listed, 4);
+assert.equal((await stats()).geocode.unmatched, 3, 'the retry button still counts only the ones with no answer');
+const found1 = (await call(admin, 'GET', `/api/admin/geocode/unplaced?q=${encodeURIComponent(String(roughName?.last_name))}`))
+  .data as UnplacedPage;
+assert.ok(found1.people.some((p) => p.id === roughId));
+assert.deepEqual(
+  ((await call(admin, 'GET', '/api/admin/geocode/unplaced?q=zzz%25')).data as UnplacedPage).people,
+  [],
+  'wildcards are literal',
+);
+assert.equal((await call(admin, 'POST', `/api/admin/people/${roughId}/place`, { lat: 33.43, lon: -111.96 })).status, 200);
+const roughPlaced = ((await call(admin, 'GET', '/api/admin/geocode/unplaced')).data as UnplacedPage).people.find((p) => p.id === roughId);
+assert.deepEqual(
+  [roughPlaced?.reason, roughPlaced?.byHand],
+  ['rough', { lat: 33.43, lon: -111.96 }],
+  'still listed, so it can be corrected',
+);
+sqlite.prepare('UPDATE people SET approximate = 0, placed_by = NULL WHERE id = ?').run(roughId);
 // more than a page: 50 at a time, each page starting where the last ended
 sqlite.exec("UPDATE people SET geocode = 'no_match' WHERE id <= 120 AND geocode = 'match'");
 const page1 = (await call(admin, 'GET', '/api/admin/geocode/unplaced')).data as UnplacedPage;
