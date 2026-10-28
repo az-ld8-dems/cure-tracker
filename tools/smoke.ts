@@ -409,6 +409,20 @@ try {
   await admin.getByRole('button', { name: 'Look up the unplaced again' }).click();
   await admin.getByText(/Looked up 1 address: 0 placed/).waitFor();
 
+  // A phone number found another way is entered for someone whose row had none, and can be taken away again.
+  await admin.getByText(/^People without a phone number \(\d+\)$/).click();
+  const phoneTable = admin.getByRole('region', { name: 'People without a phone number' });
+  const phoneRow = phoneTable.getByRole('row').nth(1);
+  await phoneRow.waitFor();
+  await phoneRow.getByRole('textbox').fill('(480) 555-0123');
+  await phoneRow.getByRole('button', { name: /^Save the phone number of / }).click();
+  await admin.getByText(/^Saved the phone number for /).waitFor();
+  await phoneTable
+    .getByRole('row')
+    .nth(1)
+    .getByRole('button', { name: /^Take away the phone number of / })
+    .waitFor();
+
   // The grace period saves, and shows after a reload.
   await admin.getByRole('tab', { name: 'Settings and log', exact: true }).click();
   await admin.getByLabel('Uploads a contacted person may stay on the list before being flagged').fill('0');

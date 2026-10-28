@@ -12,6 +12,7 @@ import type {
   InviteList,
   InviteResult,
   InviteStatus,
+  MissingPhonePage,
   NoticeList,
   NoticeResult,
   OrganizerGrant,
@@ -78,6 +79,7 @@ if (me && !me.isAdmin && !me.organizes) {
     volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
     invites: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-invites' }),
     find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
+    phones: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-phones' }),
     exported: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-export' }),
     organizers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-organizers' }),
     reset: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-reset' }),
@@ -1321,6 +1323,126 @@ if (me && !me.isAdmin && !me.organizes) {
     renderLog(page.length === 50);
   }
 
+  // ---- phone numbers found some other way, for people whose row on the sheet has none
+  let phonesOpen = false;
+  function phonesSection(total: number): void {
+    let shown: MissingPhonePage['people'] = [];
+    let query = '';
+    const rows = h('div', { class: 'fl-stack fl-stack--3' });
+    async function save(p: MissingPhonePage['people'][number], body: object, done: string): Promise<void> {
+      try {
+        await api('POST', `/api/admin/people/${p.id}/phone`, body);
+        toast(done);
+        const page = await api<MissingPhonePage>('GET', '/api/admin/phones/missing?after=0');
+        phonesSection(page.total);
+      } catch (e) {
+        toast(failureText(e), 'error');
+      }
+    }
+    function phoneBox(p: MissingPhonePage['people'][number]): HTMLElement {
+      const input = h('input', {
+        class: 'fl-input',
+        type: 'tel',
+        inputmode: 'tel',
+        autocomplete: 'off',
+        placeholder: '480-555-0123',
+        'aria-label': `Phone number for ${p.name}`,
+        value: p.phone,
+      });
+      return h(
+        'form',
+        {
+          class: 'fl-cluster pool-near-row',
+          onsubmit: (e: Event) => {
+            e.preventDefault();
+            void save(p, { phone: input.value }, `Saved the phone number for ${p.name}.`);
+          },
+        },
+        input,
+        h('button', { class: 'fl-btn fl-btn--sm', type: 'submit', 'aria-label': `Save the phone number of ${p.name}` }, 'Save'),
+        p.byHand
+          ? h(
+              'button',
+              {
+                class: 'fl-btn fl-btn--sm',
+                type: 'button',
+                'aria-label': `Take away the phone number of ${p.name}`,
+                onclick: () => void save(p, { clear: true }, `Took away the phone number of ${p.name}.`),
+              },
+              'Clear',
+            )
+          : null,
+      );
+    }
+    async function loadMore(after: number): Promise<void> {
+      const page = await api<MissingPhonePage>('GET', `/api/admin/phones/missing?after=${after}&q=${encodeURIComponent(query)}`);
+      shown = [...shown, ...page.people];
+      clear(
+        rows,
+        shown.length === 0
+          ? h('p', { class: 'fl-help' }, query === '' ? 'Everyone has a phone number.' : 'Nobody on the list matches that.')
+          : table(
+              'People without a phone number',
+              ['Person', 'Address', 'Phone number'],
+              shown.map((p) => [p.name, addressText(p.address), phoneBox(p)]),
+            ),
+        page.next === null
+          ? null
+          : h('button', { class: 'fl-btn', type: 'button', onclick: () => void loadMore(page.next ?? 0) }, 'Show more'),
+      );
+    }
+    const searchInput = h('input', {
+      class: 'fl-input',
+      type: 'search',
+      autocomplete: 'off',
+      'aria-label': 'Search the list by name or address',
+      placeholder: 'Name or address',
+    });
+    const list = h(
+      'details',
+      { class: 'fl-disclosure' },
+      h('summary', {}, `People without a phone number (${total})`),
+      h(
+        'div',
+        { class: 'fl-stack fl-stack--3' },
+        h(
+          'p',
+          { class: 'fl-help' },
+          'People whose row on the state’s sheet has no phone number. If you find one another way, write it here and press Save. It shows to volunteers like any other number. A later sheet that has a number for the person replaces it; a sheet that leaves it blank keeps it. A number from the sheet cannot be changed here.',
+        ),
+        h(
+          'form',
+          {
+            class: 'fl-cluster',
+            role: 'search',
+            onsubmit: (e: Event) => {
+              e.preventDefault();
+              query = searchInput.value.trim();
+              shown = [];
+              void loadMore(0);
+            },
+          },
+          searchInput,
+          h('button', { class: 'fl-btn', type: 'submit' }, 'Search'),
+        ),
+        rows,
+      ),
+    );
+    list.addEventListener('toggle', () => {
+      phonesOpen = list.open;
+      if (list.open && shown.length === 0) void loadMore(0);
+    });
+    if (phonesOpen) {
+      list.open = true;
+      void loadMore(0);
+    }
+    clear(
+      sections.phones,
+      heading('h-phones', 'Phone numbers'),
+      total > 0 || phonesOpen ? list : h('p', { class: 'fl-help' }, 'Everyone has a phone number.'),
+    );
+  }
+
   // ---- the CSV for the old spreadsheet
   function exportSection(): void {
     clear(
@@ -1340,10 +1462,11 @@ if (me && !me.isAdmin && !me.organizes) {
   }
 
   async function refresh(): Promise<void> {
-    const [stats, vols, notices, firstPage, settings, organizers, invites] = await Promise.all([
+    const [stats, vols, notices, missing, firstPage, settings, organizers, invites] = await Promise.all([
       api<AdminStats>('GET', '/api/admin/stats'),
       loadVolunteers(),
       api<NoticeList>('GET', '/api/admin/notices'),
+      api<MissingPhonePage>('GET', '/api/admin/phones/missing?after=0'),
       siteAdmin ? api<AuditEntry[]>('GET', '/api/admin/audit?limit=50') : null,
       siteAdmin ? api<AdminSettings>('GET', '/api/admin/settings') : null,
       siteAdmin ? api<OrganizerList>('GET', '/api/admin/organizers') : null,
@@ -1352,6 +1475,7 @@ if (me && !me.isAdmin && !me.organizes) {
     volunteers = vols;
     statsSection(stats);
     noticesSection(notices);
+    phonesSection(missing.total);
     flaggedSection(stats);
     volunteersSection(stats);
     findSection();
@@ -1372,7 +1496,7 @@ if (me && !me.isAdmin && !me.organizes) {
   // The page is four tabs, so each job has its own screen. An organizer sees the first two, with only the parts that are theirs.
   const TABS: { id: string; label: string; admin: boolean; parts: (keyof typeof sections)[] }[] = [
     { id: 'overview', label: 'Overview', admin: false, parts: ['stats', 'notices', 'flagged', 'volunteers', 'find'] },
-    { id: 'data', label: 'People data', admin: false, parts: ['upload', 'geocode', 'exported'] },
+    { id: 'data', label: 'People data', admin: false, parts: ['upload', 'geocode', 'phones', 'exported'] },
     { id: 'access', label: 'Access', admin: true, parts: ['organizers', 'invites'] },
     { id: 'system', label: 'Settings and log', admin: true, parts: ['settings', 'reset', 'audit'] },
   ];

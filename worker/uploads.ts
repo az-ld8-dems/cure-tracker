@@ -430,19 +430,7 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
 
   // Exceeded the grace: a contacted person this upload still lists, on their (grace + 1)th cycle.
   const exceeded = `people.status = 'contacted' AND people.contacted_cycles + 1 > ?1`;
-  const fields = [
-    'first_name',
-    'middle_name',
-    'last_name',
-    'party',
-    'legdist',
-    'reason_code',
-    'phone',
-    'address',
-    'city',
-    'zip',
-    'precinct',
-  ];
+  const fields = ['first_name', 'middle_name', 'last_name', 'party', 'legdist', 'reason_code', 'address', 'city', 'zip', 'precinct'];
   const statements: Stmt[] = [
     db
       .prepare(
@@ -495,6 +483,8 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
       .prepare(
         `UPDATE people SET
            key = s.key, ${fields.map((f) => `${f} = s.${f}`).join(', ')}, status_date = s.status_date,
+           phone = CASE WHEN s.phone != '' OR people.phone_by IS NULL THEN s.phone ELSE people.phone END,
+           phone_by = CASE WHEN s.phone != '' THEN NULL ELSE people.phone_by END,
            status = CASE WHEN people.status = 'cured' OR (${exceeded}) THEN 'needs_contact' ELSE people.status END,
            flag = CASE WHEN people.status = 'cured' THEN 'reappeared' WHEN ${exceeded} THEN 'still_uncured' ELSE people.flag END,
            status_changed_at = CASE WHEN people.status = 'cured' OR (${exceeded}) THEN ?2 ELSE people.status_changed_at END,
@@ -508,7 +498,9 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
          FROM upload_rows s
          WHERE s.key = ${KEY_OF('people')}
            AND (people.status IN ('cured', 'contacted') OR people.contacted_cycles != 0 OR people.key != s.key
-                OR ${[...fields, 'status_date'].map((f) => `people.${f} IS NOT s.${f}`).join(' OR ')})`,
+                OR ${[...fields, 'status_date'].map((f) => `people.${f} IS NOT s.${f}`).join(' OR ')}
+                OR (s.phone != '' AND (people.phone IS NOT s.phone OR people.phone_by IS NOT NULL))
+                OR (s.phone = '' AND people.phone_by IS NULL AND people.phone != ''))`,
       )
       .bind(grace, now, id),
     // People not on the sheet any more are cured.

@@ -42,6 +42,10 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
       return 'dismissed the flag';
     case 'person.place':
       return 'placed by hand on the map';
+    case 'person.phone':
+      return 'phone number entered by hand';
+    case 'person.unphone':
+      return 'phone number entered by hand taken away';
     case 'person.unplace':
       return 'taken off the map (a place set by hand was removed)';
     case 'location.set':
