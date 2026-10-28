@@ -546,7 +546,7 @@ if (me && !me.isAdmin && !me.organizes) {
             { class: 'fl-stack fl-stack--3' },
             table(
               'People invited',
-              ['Email', 'Status', 'Invited by', 'Last sent', h('span', { class: 'fl-sr-only' }, 'Send again')],
+              ['Email', 'Status', 'Invited by', 'Last sent', h('span', { class: 'fl-sr-only' }, 'Actions')],
               list.invites.map((i) => {
                 const [badgeClass, badgeText] = INVITE_BADGES[i.status];
                 return [
@@ -554,18 +554,40 @@ if (me && !me.isAdmin && !me.organizes) {
                   h('span', { class: badgeClass }, badgeText),
                   i.invitedBy,
                   i.lastSentAt ? dateTime(i.lastSentAt) : 'Never',
-                  i.status === 'signed_in'
-                    ? ''
-                    : h(
-                        'button',
-                        {
-                          class: 'fl-btn fl-btn--sm',
-                          type: 'button',
-                          'aria-label': `Send instructions again to ${i.email}`,
-                          onclick: () => void send(`/api/admin/invites/${i.id}/resend`, {}),
+                  h(
+                    'span',
+                    { class: 'fl-cluster' },
+                    i.status === 'signed_in'
+                      ? null
+                      : h(
+                          'button',
+                          {
+                            class: 'fl-btn fl-btn--sm',
+                            type: 'button',
+                            'aria-label': `Send instructions again to ${i.email}`,
+                            onclick: () => void send(`/api/admin/invites/${i.id}/resend`, {}),
+                          },
+                          'Send again',
+                        ),
+                    h(
+                      'button',
+                      {
+                        class: 'fl-btn fl-btn--sm',
+                        type: 'button',
+                        'aria-label': `Remove ${i.email} from the invited list`,
+                        onclick: async () => {
+                          try {
+                            await api('POST', `/api/admin/invites/${i.id}/remove`, {});
+                            toast(`Removed ${i.email} from the list. Their Access entry, if any, is unchanged.`);
+                            await reloadInvites();
+                          } catch (e) {
+                            toast(failureText(e), 'error');
+                          }
                         },
-                        'Send again',
-                      ),
+                      },
+                      'Remove',
+                    ),
+                  ),
                 ];
               }),
             ),
