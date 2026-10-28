@@ -33,7 +33,7 @@ import type { Db, Stmt, Value } from './db.ts';
 import { type ExportNote, type ExportPerson, exportCsv } from './export.ts';
 import { censusLine, GeocodeError, geocodeChunk, HAND_LIST, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { invite, MAX_PER_REQUEST, parseEmails } from './invites.ts';
-import { type Mailer, sendAssignmentNotice, sendFeedback } from './mail.ts';
+import { type Mailer, sendAssignmentNotice, sendFeedback, sendInviteReminder } from './mail.ts';
 import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import { allGrants, type Grant, inScope, parseGrant, replaceGrant, type Scope, scopeOf, scopeWhere } from './organizers.ts';
@@ -1094,7 +1094,10 @@ async function sendInvites(c: Ctx, emails: string[], rejected: string[]): Promis
     else if (outcome === 'failed') result.failed.push(email);
     else result.skipped.push({ email, why: outcome });
   }
-  if (result.sent.length > 0) await c.db.batch(result.sent.map((email) => auditStmt(c, 'invite.send', null, { email })));
+  if (result.sent.length > 0) {
+    await c.db.batch(result.sent.map((email) => auditStmt(c, 'invite.send', null, { email })));
+    await sendInviteReminder(c.mailer, c.me, result.sent, c.origin);
+  }
   return json(result);
 }
 

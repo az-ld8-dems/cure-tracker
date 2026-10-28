@@ -533,7 +533,7 @@ if (me && !me.isAdmin && !me.organizes) {
         h(
           'p',
           { class: 'fl-help' },
-          'Each person gets an email with step-by-step instructions for signing in. Add their addresses to the Cloudflare Access policy first: the site turns away anyone who is not on it, and sending does not add them.',
+          'Each person gets an email with step-by-step instructions for signing in. Add their addresses to the Cloudflare Access policy first: the site turns away anyone who is not on it, and sending does not add them. A reminder to do that is emailed to admin@azld8cures.com each time invitations go out.',
         ),
         field('invite-emails', 'Email addresses, one per line or separated by commas', emails),
         h('button', { class: 'btn', type: 'submit', disabled: !list.emailReady }, 'Send invitations'),
