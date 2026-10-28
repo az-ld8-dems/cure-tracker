@@ -8,6 +8,7 @@ import {
   $,
   addressText,
   api,
+  assignBox,
   banner,
   boot,
   clear,
@@ -15,6 +16,8 @@ import {
   failureText,
   flagBadge,
   h,
+  loadVolunteers,
+  mayOrganize,
   personName,
   statusBadge,
   titleCase,
@@ -52,6 +55,9 @@ const app = $('#app');
 
 if (me) {
   const myId = me.id;
+  const self = me;
+  // Who a person can be assigned to, for an organizer; the map asks once.
+  const assignees = me.organizes ? [...(await loadVolunteers()).values()].filter((v) => v.id !== me.id) : [];
   const theme = (): 'light' | 'dark' => {
     const set = document.documentElement.getAttribute('data-theme');
     if (set === 'light' || set === 'dark') return set;
@@ -364,8 +370,16 @@ if (me) {
                 ),
               )
             : banner('info', h('p', {}, 'Somebody has this person now.')),
+        // An organizer can give the person to a volunteer (or move them from one), within their precincts.
+        p.status !== 'cured' && mayOrganize(self, p.precinct) ? assignBox(p, assignees, () => assigned()) : null,
       ),
     );
+  }
+
+  async function assigned(): Promise<void> {
+    picked = null;
+    clear(detail);
+    await load();
   }
 
   async function claim(p: Person): Promise<void> {

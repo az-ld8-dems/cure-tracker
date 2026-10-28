@@ -278,3 +278,41 @@ export async function loadVolunteers(): Promise<Map<number, Volunteer>> {
   const list = await api<Volunteer[]>('GET', '/api/volunteers');
   return new Map(list.map((v) => [v.id, v]));
 }
+
+// Whether the signed-in volunteer organizes this precinct (the server checks again). A blank precinct can be moved by anyone who organizes.
+export const mayOrganize = (me: Me, precinct: string): boolean => {
+  if (!me.organizes) return false;
+  if (me.organizes.all || precinct === '') return true;
+  const want = precinct.toLowerCase();
+  return me.organizes.precincts.some((p) => p.toLowerCase() === want);
+};
+
+// "Assign to": pick a volunteer and give them this person. The volunteer is not emailed here: an admin sends one email for a batch from the Admin page (worker/mail.ts).
+export function assignBox(p: Person, volunteers: Volunteer[], assigned: (p: Person, to: Volunteer) => void | Promise<void>): HTMLElement {
+  const pick = h(
+    'select',
+    { class: 'fl-select', id: `assign-${p.id}`, 'aria-label': `Assign ${personName(p)} to` },
+    h('option', { value: '' }, 'Assign to...'),
+    ...volunteers.map((v) => h('option', { value: String(v.id) }, volunteerName(v))),
+  );
+  const go = h(
+    'button',
+    {
+      class: 'fl-btn',
+      type: 'button',
+      onclick: async () => {
+        const to = volunteers.find((v) => String(v.id) === pick.value);
+        if (!to) return;
+        try {
+          await api<Person>('POST', `/api/admin/people/${p.id}/assign`, { volunteerId: to.id });
+          toast(`${personName(p)} is on ${volunteerName(to)}'s list now. They are not emailed until you send it from the Admin page.`);
+          await assigned(p, to);
+        } catch (e) {
+          toast(failureText(e), 'error');
+        }
+      },
+    },
+    'Assign',
+  );
+  return h('div', { class: 'fl-cluster' }, pick, go);
+}

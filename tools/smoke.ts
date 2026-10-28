@@ -544,6 +544,11 @@ try {
   for (const only of ['Upload the state’s sheet', 'Who organizes precincts', 'Audit log', 'Unsuccessful cures'])
     expect('organizer', (await organizer.getByRole('heading', { name: only }).count()) === 0, `${only} is shown to an organizer`);
   await check(organizer, 'admin (organizer)');
+  // An organizer can assign people from Find people (a plain volunteer cannot: dora's page below has no Assign column).
+  await organizer.goto(`${base}/pool/`);
+  await organizer.getByRole('button', { name: 'Assign', exact: true }).first().waitFor();
+  expect('organizer', (await organizer.getByLabel(/^Assign .* to$/).count()) > 0, 'Find people has no assign control for an organizer');
+  await check(organizer, 'find people (organizer)');
   await organizerCtx.close();
   await adminCtx.close();
 

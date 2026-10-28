@@ -10,7 +10,7 @@ const files = readdirSync(dir)
   .filter((n) => n.endsWith('.sql'))
   .sort();
 const last = '0012_contact_methods.sql';
-assert.equal(files.at(-1), last, 'this test is about the newest migration; update it when another follows');
+assert.ok(files.includes(last), 'the migration this test is about is gone');
 
 const db = new DatabaseSync(':memory:');
 db.exec('PRAGMA foreign_keys = ON');

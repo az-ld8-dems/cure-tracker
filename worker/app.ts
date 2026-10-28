@@ -5,6 +5,7 @@ import type { AccessVerifier } from './access.ts';
 import { type AccessEnv, requireAccess } from './access-gate.ts';
 import { handleApi } from './api.ts';
 import type { Db } from './db.ts';
+import type { Mailer } from './mail.ts';
 import { organizesAnything } from './organizers.ts';
 import { serveTiles, TILES_PATH, type TileBucket, tilesReady } from './tiles.ts';
 
@@ -16,6 +17,8 @@ export interface AppEnv extends AccessEnv {
   DB: Db;
   // The R2 bucket that holds the map's tiles (docs/setup.md). Without it the map file answers 404 and the map draws only the pins.
   TILES?: TileBucket;
+  // The `send_email` binding (wrangler.jsonc, docs/setup.md). Without it nothing is emailed and assigning still works.
+  EMAIL?: Mailer | undefined;
   ASSETS: { fetch(request: Request): Promise<Response> };
 }
 
@@ -53,6 +56,7 @@ export async function handle(request: Request, env: AppEnv, deps: Deps = {}): Pr
       now: deps.now ?? (() => new Date()),
       fetcher: deps.fetcher ?? fetch,
       tilesReady: () => tilesReady(env.TILES),
+      mailer: env.EMAIL,
     });
   }
   if (path === TILES_PATH) return serveTiles(request, env.TILES);
