@@ -426,7 +426,7 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
   const clause = where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`;
   const { results } = await c.db
     .prepare(
-      `${near ? `${PERSON_COLUMNS}, p.approximate AS approximate, ${near.away} AS away\n  FROM people p` : PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`,
+      `${near ? `${PERSON_COLUMNS}, (p.approximate = 1 OR p.placed_by IS NOT NULL) AS approximate, ${near.away} AS away\n  FROM people p` : PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`,
     )
     .bind(...binds, limit + 1, offset)
     .all<PersonRow>();
