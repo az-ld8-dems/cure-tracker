@@ -33,7 +33,7 @@ import type { Db, Stmt, Value } from './db.ts';
 import { type ExportNote, type ExportPerson, exportCsv } from './export.ts';
 import { censusLine, GeocodeError, geocodeChunk, HAND_LIST, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { invite, MAX_PER_REQUEST, parseEmails } from './invites.ts';
-import { type Mailer, sendAssignmentNotice } from './mail.ts';
+import { type Mailer, sendAssignmentNotice, sendFeedback } from './mail.ts';
 import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import { allGrants, type Grant, inScope, parseGrant, replaceGrant, type Scope, scopeOf, scopeWhere } from './organizers.ts';
@@ -596,6 +596,27 @@ async function addNote(c: Ctx, p: string[], body: Body): Promise<Response> {
     volunteerName: c.me.name || c.me.email,
   };
   return json(note, 201);
+}
+
+// ---- feedback: a message to whoever runs the tool, by email
+
+// One a minute per person.
+const FEEDBACK_EVERY_MS = 60_000;
+
+async function postFeedback(c: Ctx, _p: string[], body: Body): Promise<Response> {
+  const message = text(body, 'message', 4000);
+  const page = text(body, 'page', 200, false);
+  if (!c.mailer) throw new HttpError(503, 'Feedback cannot be sent right now. Please email admin@azld8cures.com instead.');
+  const recent = await c.db
+    .prepare("SELECT COUNT(*) AS n FROM audit WHERE actor = ? AND action = 'feedback.send' AND at > ?")
+    .bind(c.me.email, new Date(c.at.getTime() - FEEDBACK_EVERY_MS).toISOString())
+    .first<{ n: number }>();
+  if ((recent?.n ?? 0) > 0) throw new HttpError(429, 'You just sent feedback. Please wait a minute before sending more.');
+  if (!(await sendFeedback(c.mailer, c.me, page, message)))
+    throw new HttpError(502, 'The message could not be sent. Please try again, or email admin@azld8cures.com.');
+  // The audit row says that feedback was sent, not what it said.
+  await auditStmt(c, 'feedback.send', null, {}).run();
+  return json({ sent: true });
 }
 
 // ---- routes: admins
@@ -1240,6 +1261,7 @@ const routes: Route[] = [
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/release$/, level: 'volunteer', handler: release },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/status$/, level: 'volunteer', handler: setStatus },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/notes$/, level: 'volunteer', handler: addNote },
+  { method: 'POST', pattern: /^\/api\/feedback$/, level: 'volunteer', handler: postFeedback },
   { method: 'GET', pattern: /^\/api\/admin\/stats$/, level: 'organizer', handler: adminStats },
   { method: 'GET', pattern: /^\/api\/admin\/audit$/, level: 'admin', handler: adminAudit },
   { method: 'GET', pattern: /^\/api\/admin\/uploads$/, level: 'admin', handler: adminUploads },

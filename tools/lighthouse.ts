@@ -27,6 +27,7 @@ const pages: { user: string; path: string; loosened?: Loosened }[] = [
   { user: DEV_VOLUNTEER, path: '/' },
   { user: DEV_VOLUNTEER, path: '/pool/' },
   { user: DEV_VOLUNTEER, path: '/map/', loosened: MAP_COSTS },
+  { user: DEV_VOLUNTEER, path: '/feedback/' },
   { user: DEV_ADMIN, path: '/admin/' },
 ];
 
