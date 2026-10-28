@@ -1,4 +1,4 @@
-// The CSV of open people a volunteer has worked on, for keeping the old spreadsheet in step: name, the status a volunteer set, and their notes.
+// The CSV of open people a volunteer has worked on, for keeping the old spreadsheet in step: name, the status a volunteer set, the volunteer who has them, and their notes.
 // No phone, address or other detail. Free of Worker-only globals. Only erasable TypeScript syntax.
 
 const STATUS_TEXT: Record<string, string> = {
@@ -19,6 +19,7 @@ export interface ExportPerson {
   middle_name: string;
   last_name: string;
   status: string;
+  volunteer: string;
 }
 
 export interface ExportNote {
@@ -31,10 +32,10 @@ export const fullName = (p: Pick<ExportPerson, 'first_name' | 'middle_name' | 'l
   [p.first_name, p.middle_name, p.last_name].filter((s) => s !== '').join(' ');
 
 export function exportCsv(rows: { person: ExportPerson; notes: ExportNote[] }[]): string {
-  const lines = ['Name,Status,Notes'];
+  const lines = ['Name,Status,Volunteer,Notes'];
   for (const { person, notes } of rows) {
     const text = notes.map((n) => `${n.at.slice(0, 10)} ${n.author}: ${n.body}`).join('\n');
-    lines.push([fullName(person), STATUS_TEXT[person.status] ?? person.status, text].map(csvField).join(','));
+    lines.push([fullName(person), STATUS_TEXT[person.status] ?? person.status, person.volunteer, text].map(csvField).join(','));
   }
   return `${lines.join('\r\n')}\r\n`;
 }

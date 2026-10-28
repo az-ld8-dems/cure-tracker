@@ -68,14 +68,16 @@ const note = (personId: number, by: number, body: string, at: string): void => {
 sqlite.prepare("UPDATE volunteers SET name = 'Dora Doe' WHERE id = ?").run(dora);
 
 const untouched = person('Una', '', 'Untouched', 'Alma', 'needs_contact'); // nothing done: left out
-const left = person('Lee', 'M', 'Message', 'Alma', 'left_voicemail'); // a status, no notes
+const left = person('Lee', 'M', 'Message', 'Alma', 'left_voicemail'); // a status, no notes, held by Dora
 const noted = person('Nora', '', 'Noted', 'Alma', 'needs_contact'); // notes, still needs contact
 const done = person('Cora', '', 'Cured', 'Alma', 'cured'); // cured: left out
 const other = person('Olga', '', 'Other', 'Cairo', 'contacted'); // another precinct
 note(noted, dora, 'Wrong number, try email', '2026-10-20T09:00:00.000Z');
 note(noted, boss, '=1+1 and "quoted"\nsecond line', '2026-10-21T09:00:00.000Z');
 note(done, dora, 'Cured already', '2026-10-19T09:00:00.000Z');
-assert.ok(untouched && left && other);
+sqlite.prepare('UPDATE people SET assigned_to = ? WHERE id = ?').run(dora, left);
+sqlite.prepare('UPDATE people SET assigned_to = ? WHERE id = ?').run(boss, other);
+assert.ok(untouched);
 
 // A plain volunteer cannot download it.
 assert.equal((await call('dora@example.com', 'GET', '/api/admin/export/worked.csv')).status, 403);
@@ -88,10 +90,10 @@ assert.match(all.disposition ?? '', /^attachment; filename="/);
 assert.equal(
   all.text,
   [
-    'Name,Status,Notes',
-    '"Lee M Message","Left a message",""',
-    '"Nora Noted","Needs to be contacted","2026-10-20 Dora Doe: Wrong number, try email\n2026-10-21 boss@example.com: =1+1 and ""quoted""\nsecond line"',
-    '"Olga Other","Contacted",""',
+    'Name,Status,Volunteer,Notes',
+    '"Lee M Message","Left a message","Dora Doe",""',
+    '"Nora Noted","Needs to be contacted","","2026-10-20 Dora Doe: Wrong number, try email\n2026-10-21 boss@example.com: =1+1 and ""quoted""\nsecond line"',
+    '"Olga Other","Contacted","boss@example.com",""',
     '',
   ].join('\r\n'),
 );

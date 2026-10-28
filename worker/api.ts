@@ -1091,7 +1091,8 @@ async function exportWorked(c: Ctx): Promise<Response> {
   const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'p.precinct');
   const { results } = await c.db
     .prepare(
-      `SELECT p.id, p.first_name, p.middle_name, p.last_name, p.status FROM people p
+      `SELECT p.id, p.first_name, p.middle_name, p.last_name, p.status, COALESCE(NULLIF(v.name, ''), v.email, '') AS volunteer
+       FROM people p LEFT JOIN volunteers v ON v.id = p.assigned_to
        WHERE p.status != 'cured' AND ${only.sql}
          AND (p.status != 'needs_contact' OR EXISTS (SELECT 1 FROM notes n WHERE n.person_id = p.id))
        ORDER BY p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE, p.id`,

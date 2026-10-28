@@ -1283,7 +1283,7 @@ if (me && !me.isAdmin && !me.organizes) {
       h(
         'p',
         { class: 'fl-help' },
-        'A CSV with the name, the status and the notes of every open person a volunteer has worked on: a status other than "Needs to be contacted", or at least one note. Cured people are left out. It lists only the precincts you organize, and it holds voters\' names, so keep the file private.',
+        'A CSV with the name, the status, the volunteer who has them and the notes of every open person a volunteer has worked on: a status other than "Needs to be contacted", or at least one note. Cured people are left out. It lists only the precincts you organize, and it holds voters\' names, so keep the file private.',
       ),
       h(
         'div',
