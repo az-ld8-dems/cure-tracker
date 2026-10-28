@@ -78,6 +78,7 @@ if (me && !me.isAdmin && !me.organizes) {
     volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
     invites: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-invites' }),
     find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
+    exported: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-export' }),
     organizers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-organizers' }),
     reset: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-reset' }),
     audit: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-audit' }),
@@ -1274,6 +1275,24 @@ if (me && !me.isAdmin && !me.organizes) {
     renderLog(page.length === 50);
   }
 
+  // ---- the CSV for the old spreadsheet
+  function exportSection(): void {
+    clear(
+      sections.exported,
+      heading('h-export', 'Export for the old spreadsheet'),
+      h(
+        'p',
+        { class: 'fl-help' },
+        'A CSV with the name, the status, the volunteer who has them and the notes of every open person a volunteer has worked on: a status other than "Needs to be contacted", or at least one note. Cured people are left out. It lists only the precincts you organize, and it holds voters\' names, so keep the file private.',
+      ),
+      h(
+        'div',
+        { class: 'fl-cluster' },
+        h('a', { class: 'btn', href: '/api/admin/export/worked.csv', download: 'people-worked-on.csv' }, 'Download the CSV'),
+      ),
+    );
+  }
+
   async function refresh(): Promise<void> {
     const [stats, vols, notices, firstPage, settings, organizers, invites] = await Promise.all([
       api<AdminStats>('GET', '/api/admin/stats'),
@@ -1290,6 +1309,7 @@ if (me && !me.isAdmin && !me.organizes) {
     flaggedSection(stats);
     volunteersSection(stats);
     findSection();
+    exportSection();
     if (firstPage && settings && organizers && invites) {
       invitesSection(invites);
       log = firstPage;
@@ -1306,7 +1326,7 @@ if (me && !me.isAdmin && !me.organizes) {
   try {
     const shown = siteAdmin
       ? Object.values(sections)
-      : [sections.stats, sections.notices, sections.flagged, sections.volunteers, sections.find];
+      : [sections.stats, sections.notices, sections.flagged, sections.volunteers, sections.find, sections.exported];
     if (!siteAdmin) $('.lead').textContent = 'Check on volunteers and move the people of your precincts around.';
     clear(app, ...shown);
     if (siteAdmin) uploadSection();
