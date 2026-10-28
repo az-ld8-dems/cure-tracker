@@ -1124,6 +1124,17 @@ async function exportWorked(c: Ctx): Promise<Response> {
   });
 }
 
+// Takes someone off the invited list (a typo, or someone who will not join). It does not touch an account or the Access policy.
+async function removeInvite(c: Ctx, p: string[]): Promise<Response> {
+  const row = await c.db.prepare('SELECT email FROM invites WHERE id = ?').bind(idOf(p[0])).first<{ email: string }>();
+  if (!row) throw new HttpError(404, 'No such invite');
+  await c.db.batch([
+    c.db.prepare('DELETE FROM invites WHERE id = ?').bind(idOf(p[0])),
+    auditStmt(c, 'invite.remove', null, { email: row.email }),
+  ]);
+  return json({ removed: row.email });
+}
+
 // Who organizes what, for the admin page: every volunteer's grant, and the precincts the open people are in (to spot a grant that no longer matches).
 async function listOrganizers(c: Ctx): Promise<Response> {
   const grants = await allGrants(c.db);
@@ -1236,6 +1247,7 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: listInvites },
   { method: 'POST', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: postInvites },
   { method: 'POST', pattern: /^\/api\/admin\/invites\/(\d+)\/resend$/, level: 'admin', handler: resendInvite },
+  { method: 'POST', pattern: /^\/api\/admin\/invites\/(\d+)\/remove$/, level: 'admin', handler: removeInvite },
   { method: 'GET', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: getSettings },
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/reset$/, level: 'admin', handler: reset },

@@ -109,6 +109,17 @@ assert.deepEqual(((await call('boss@example.com', 'POST', `/api/admin/invites/${
 assert.equal(sent.length, 3);
 assert.equal((await call('boss@example.com', 'POST', '/api/admin/invites/9999/resend', {})).status, 404);
 
+// Removing an invite: gone from the list, audited, and a second try finds nothing. Only a site admin may.
+await post('rae@example.com');
+const raeId = (await invites()).invites.find((i) => i.email === 'rae@example.com')?.id;
+assert.equal((await call('anna@example.com', 'POST', `/api/admin/invites/${raeId}/remove`, {})).status, 403);
+assert.equal((await call('boss@example.com', 'POST', `/api/admin/invites/${raeId}/remove`, {})).status, 200);
+assert.equal(
+  (await invites()).invites.some((i) => i.email === 'rae@example.com'),
+  false,
+);
+assert.equal((await call('boss@example.com', 'POST', `/api/admin/invites/${raeId}/remove`, {})).status, 404);
+
 // A failing mailer: nothing is lost, the invite shows as not sent, and a later try works at once.
 failing = true;
 const bad = (await post('quinn@example.com')).data as InviteResult;
@@ -125,5 +136,9 @@ assert.equal(((await call('boss@example.com', 'GET', '/api/admin/invites', undef
 // Every send is in the audit log, once, and the failed one is not.
 const log = (await call('boss@example.com', 'GET', '/api/admin/audit?limit=200')).data as AuditEntry[];
 const audited = log.filter((e) => e.action === 'invite.send').map((e) => (e.detail as { email: string }).email);
-assert.deepEqual(audited.sort(), ['olga@example.com', 'pia@example.com', 'pia@example.com', 'quinn@example.com']);
+assert.deepEqual(audited.sort(), ['olga@example.com', 'pia@example.com', 'pia@example.com', 'quinn@example.com', 'rae@example.com']);
+assert.deepEqual(
+  log.filter((e) => e.action === 'invite.remove').map((e) => (e.detail as { email: string }).email),
+  ['rae@example.com'],
+);
 console.log('test-invites: ok');
