@@ -30,6 +30,7 @@ import type {
 import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
+import { type ExportNote, type ExportPerson, exportCsv } from './export.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { invite, MAX_PER_REQUEST, parseEmails } from './invites.ts';
 import { type Mailer, sendAssignmentNotice } from './mail.ts';
@@ -1085,6 +1086,43 @@ async function resendInvite(c: Ctx, p: string[]): Promise<Response> {
   return sendInvites(c, [row.email], []);
 }
 
+// Open people a volunteer has worked on (a status other than "needs to be contacted", or any note), in the caller's precincts, as a CSV.
+async function exportWorked(c: Ctx): Promise<Response> {
+  const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'p.precinct');
+  const { results } = await c.db
+    .prepare(
+      `SELECT p.id, p.first_name, p.middle_name, p.last_name, p.status FROM people p
+       WHERE p.status != 'cured' AND ${only.sql}
+         AND (p.status != 'needs_contact' OR EXISTS (SELECT 1 FROM notes n WHERE n.person_id = p.id))
+       ORDER BY p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE, p.id`,
+    )
+    .bind(...only.binds)
+    .all<ExportPerson & { id: number }>();
+  const { results: noteRows } = await c.db
+    .prepare(
+      `SELECT n.person_id, n.body, n.created_at, v.name, v.email FROM notes n
+       JOIN volunteers v ON v.id = n.volunteer_id JOIN people p ON p.id = n.person_id
+       WHERE p.status != 'cured' AND ${only.sql} ORDER BY n.created_at, n.id`,
+    )
+    .bind(...only.binds)
+    .all<{ person_id: number; body: string; created_at: string; name: string; email: string }>();
+  const notesOf = new Map<number, ExportNote[]>();
+  for (const n of noteRows) {
+    const list = notesOf.get(n.person_id) ?? [];
+    list.push({ author: n.name === '' ? n.email : n.name, at: n.created_at, body: n.body });
+    notesOf.set(n.person_id, list);
+  }
+  await c.db.batch([auditStmt(c, 'export.worked', null, { people: results.length })]);
+  return new Response(exportCsv(results.map((person) => ({ person, notes: notesOf.get(person.id) ?? [] }))), {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': 'attachment; filename="people-worked-on.csv"',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    },
+  });
+}
+
 // Who organizes what, for the admin page: every volunteer's grant, and the precincts the open people are in (to spot a grant that no longer matches).
 async function listOrganizers(c: Ctx): Promise<Response> {
   const grants = await allGrants(c.db);
@@ -1191,6 +1229,7 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/uploads$/, level: 'admin', handler: adminUploads },
   { method: 'GET', pattern: /^\/api\/admin\/organizers$/, level: 'admin', handler: listOrganizers },
   { method: 'PUT', pattern: /^\/api\/admin\/volunteers\/(\d+)\/organizer$/, level: 'admin', handler: setOrganizer },
+  { method: 'GET', pattern: /^\/api\/admin\/export\/worked\.csv$/, level: 'organizer', handler: exportWorked },
   { method: 'GET', pattern: /^\/api\/admin\/notices$/, level: 'organizer', handler: listNotices },
   { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/notify$/, level: 'organizer', handler: sendNotice },
   { method: 'GET', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: listInvites },
