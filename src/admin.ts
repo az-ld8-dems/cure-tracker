@@ -1101,7 +1101,7 @@ if (me && !me.isAdmin && !me.organizes) {
         ? h('p', { class: 'fl-help' }, 'Nobody has signed in yet.')
         : table(
             'Volunteers and their people',
-            ['Volunteer', 'Open', 'To contact', 'Voicemail', 'Contacted', 'Cured', 'Flagged', 'Last seen', 'Move all open people to'],
+            ['Volunteer', 'Open', 'To contact', 'Left a message', 'Contacted', 'Cured', 'Flagged', 'Last seen', 'Move all open people to'],
             s.volunteers.map((v) => {
               // Who gets them: type to find a volunteer, or leave the box empty to send them back to the pool. The list floats over the page.
               const to = h('input', {

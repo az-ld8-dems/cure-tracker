@@ -159,7 +159,7 @@ if (me) {
         h(
           'span',
           { class: 'fl-help' },
-          'Contacted means you gave the cure steps to the voter or a relative. It is a promise, not a cure: they are cured only when the state’s list no longer has them.',
+          'Contacted means you talked with the voter, or gave the cure steps to someone at their address. It is a promise, not a cure: they are cured only when the state’s list no longer has them.',
         ),
       ),
       field(`method-${p.id}`, 'How did you reach them?', method),
@@ -231,7 +231,7 @@ if (me) {
         'div',
         { class: 'fl-empty fl-stack fl-stack--3', role: 'status' },
         h('p', {}, 'You don’t have anybody yet.'),
-        h('a', { class: 'btn btn--accent', href: '/pool/' }, 'Find people to call'),
+        h('a', { class: 'btn btn--accent', href: '/pool/' }, 'Find people to contact'),
       ),
     );
   }
