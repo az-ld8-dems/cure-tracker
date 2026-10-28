@@ -10,7 +10,35 @@ export const THROTTLE_MS = 30 * 60_000;
 
 // The slice of the Worker's `send_email` binding used here (env.EMAIL), so tests can stand in for it.
 export interface Mailer {
-  send(message: { from: string; to: string; subject: string; text: string }): Promise<unknown>;
+  send(message: { from: string; to: string; subject: string; text: string; html: string }): Promise<unknown>;
+}
+
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+// The HTML version, in the LD8 colors (public/tokens.css). Mail clients ignore stylesheets, so the styles are inline, in a table layout.
+// No images: the site is behind Access, so nothing on it could load in a mail client, and no external host is used.
+export function assignedHtml(who: string, link: string): string {
+  const font = "font-family:'Public Sans',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  return `<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#faf7f2">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf7f2">
+<tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e3ded4;border-radius:8px">
+<tr><td style="background:#1f497d;color:#ffffff;padding:16px 24px;border-radius:8px 8px 0 0;${font};font-size:20px;font-weight:bold">Arizona LD8 Democrats</td></tr>
+<tr><td style="padding:24px;color:#14202e;${font};font-size:16px;line-height:1.5">
+<h1 style="margin:0 0 16px;font-size:22px;color:#12294a">You have a new voter to contact</h1>
+<p style="margin:0 0 24px"><strong>${escapeHtml(who)}</strong> assigned you a voter.</p>
+<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#b4501f;border-radius:6px"><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;color:#ffffff;${font};font-size:16px;font-weight:bold;text-decoration:none">View my list</a></td></tr></table>
+<p style="margin:24px 0 0;font-size:14px;color:#4a5668">This email has no voter information in it. Sign in to see who to contact.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+`;
 }
 
 export interface Assigner {
@@ -43,6 +71,7 @@ export async function notifyAssigned(
       to: to.email,
       subject: 'You have a new voter to contact',
       text: `${who} assigned you a voter.\n\nCheck your list on the cure tracker: ${origin}/\n\nThis email has no voter information in it. Sign in to see who to contact.\n`,
+      html: assignedHtml(who, `${origin}/`),
     });
     return true;
   } catch (e) {

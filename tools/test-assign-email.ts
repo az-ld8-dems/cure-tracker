@@ -4,14 +4,14 @@ import assert from 'node:assert/strict';
 import type { Me } from '../src/api.d.ts';
 import type { AccessVerifier } from '../worker/access.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
-import { FROM, type Mailer, THROTTLE_MS } from '../worker/mail.ts';
+import { assignedHtml, FROM, type Mailer, THROTTLE_MS } from '../worker/mail.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
 
 console.warn = () => {};
 console.error = () => {};
 
 const sqlite = migratedDb();
-const sent: { from: string; to: string; subject: string; text: string }[] = [];
+const sent: { from: string; to: string; subject: string; text: string; html: string }[] = [];
 let failing = false;
 const mailer: Mailer = {
   send: async (message) => {
@@ -74,7 +74,10 @@ assert.equal(mail?.from, FROM);
 assert.match(FROM, /<admin@azld8cures\.com>$/);
 assert.match(mail?.text ?? '', /Bea Boss \(boss@example\.com\) assigned you a voter/);
 assert.match(mail?.text ?? '', /https:\/\/cure\.example\//);
-assert.doesNotMatch(`${mail?.subject}\n${mail?.text}`, /Secret|Person|Alma/, 'no voter data in the email');
+assert.doesNotMatch(`${mail?.subject}\n${mail?.text}\n${mail?.html}`, /Secret|Person|Alma/, 'no voter data in the email');
+assert.match(mail?.html ?? '', /<a href="https:\/\/cure\.example\/"[^>]*>View my list<\/a>/, 'a clickable link');
+assert.match(mail?.html ?? '', /Bea Boss \(boss@example\.com\)/);
+assert.equal(assignedHtml('<b>"x"</b>', 'https://a/?a=1&b=2').includes('<b>'), false, 'names are escaped');
 
 // A burst sends one email; after the window, the next assignment sends another.
 assert.equal((await assign('boss@example.com', ids[1], vera)).status, 200);
