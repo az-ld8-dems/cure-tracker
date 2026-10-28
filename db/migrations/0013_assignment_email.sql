@@ -1,3 +1,2 @@
--- When a volunteer was last emailed that someone assigned them a voter (worker/mail.ts). One email per volunteer per throttle window, so an
--- organizer assigning ten people in a row sends one message, not ten.
+-- When a volunteer was last emailed that people were assigned to them (worker/mail.ts); the admin page shows it next to the button.
 ALTER TABLE volunteers ADD COLUMN notified_at TEXT;

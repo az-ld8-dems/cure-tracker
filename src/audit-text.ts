@@ -69,6 +69,8 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
     }
     case 'reset':
       return `deleted all voters (${count(d.people, 'person', 'people')}, ${count(d.notes, 'note')}, ${count(d.uploads, 'upload')})`;
+    case 'notify.send':
+      return `emailed ${volunteer(d.volunteer)} about ${count(d.count, 'new person', 'new people')}`;
     case 'invite.send':
       return `emailed sign-in instructions to ${String(d.email)}`;
     case 'volunteer.join':

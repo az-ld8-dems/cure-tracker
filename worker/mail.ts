@@ -1,12 +1,9 @@
-// The one email the app sends: "someone assigned you a voter, check the site". It never names the voter or carries any voter data; the
+// The emails the app sends: "someone assigned you voters, check the site" (sent by hand, once per volunteer). It never names the voter or carries any voter data; the
 // volunteer signs in (Access) to see their list. Every volunteer row is made from a signed-in Access identity, and Access has confirmed
 // the address (a one-time PIN sent to it, or Google), so the address is verified by the time anyone can be assigned to it. Free of
 // Worker-only globals. Only erasable TypeScript syntax.
-import type { Db } from './db.ts';
 
 export const FROM = 'LD8 Cure Tracker <admin@azld8cures.com>';
-// At most one email to a volunteer per this long, however many people are assigned to them.
-export const THROTTLE_MS = 30 * 60_000;
 
 // The slice of the Worker's `send_email` binding used here (env.EMAIL), so tests can stand in for it.
 export interface Mailer {
@@ -43,9 +40,11 @@ ${inner}
 export const emailButton = (link: string, label: string, fontSize = 16): string =>
   `<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#b4501f;border-radius:6px"><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;color:#ffffff;${FONT};font-size:${fontSize}px;font-weight:bold;text-decoration:none">${escapeHtml(label)}</a></td></tr></table>`;
 
-export function assignedHtml(who: string, link: string): string {
-  return emailShell(`<h1 style="margin:0 0 16px;font-size:22px;color:#12294a">You have a new voter to contact</h1>
-<p style="margin:0 0 24px"><strong>${escapeHtml(who)}</strong> assigned you a voter.</p>
+const voters = (count: number): string => (count === 1 ? 'a voter' : `${count} voters`);
+
+export function assignedHtml(who: string, link: string, count: number): string {
+  return emailShell(`<h1 style="margin:0 0 16px;font-size:22px;color:#12294a">You have ${count === 1 ? 'a new voter' : `${count} new voters`} to contact</h1>
+<p style="margin:0 0 24px"><strong>${escapeHtml(who)}</strong> assigned you ${voters(count)}.</p>
 ${emailButton(link, 'View my list')}
 <p style="margin:16px 0 0;font-size:14px;color:#4a5668">Or type this address into your browser: ${escapeHtml(link)}</p>
 <p style="margin:16px 0 0;font-size:14px;color:#4a5668">This email has no voter information in it. Sign in to see who to contact.</p>`);
@@ -56,38 +55,28 @@ export interface Assigner {
   email: string;
 }
 
-// Emails the volunteer that `by` assigned them someone, unless they were emailed lately. A failure to send never fails the assignment: it is
-// logged and the volunteer simply finds the person on their list. Returns whether a message went out.
-export async function notifyAssigned(
-  db: Db,
-  mailer: Mailer | undefined,
-  to: { id: number; email: string },
+// Emails a volunteer once about `count` people assigned to them. An admin presses the button after assigning a batch, so a volunteer gets
+// one message however many people arrive. Returns whether it went out; a failure is logged and leaves the people marked, to try again.
+export async function sendAssignmentNotice(
+  mailer: Mailer,
+  to: { email: string },
   by: Assigner,
+  count: number,
   origin: string,
-  now: Date,
 ): Promise<boolean> {
-  if (!mailer) return false;
-  // One statement claims the send, so two assignments at once send one email.
-  const cutoff = new Date(now.getTime() - THROTTLE_MS).toISOString();
-  const claimed = await db
-    .prepare('UPDATE volunteers SET notified_at = ? WHERE id = ? AND (notified_at IS NULL OR notified_at < ?)')
-    .bind(now.toISOString(), to.id, cutoff)
-    .run();
-  if (claimed.meta.changes === 0) return false;
   const who = by.name === '' ? by.email : `${by.name} (${by.email})`;
   try {
     await mailer.send({
       from: FROM,
       to: to.email,
-      subject: 'You have a new voter to contact',
-      text: `${who} assigned you a voter.\n\nCheck your list on the cure tracker: ${origin}/\n\nThis email has no voter information in it. Sign in to see who to contact.\n`,
-      html: assignedHtml(who, `${origin}/`),
+      replyTo: by.email,
+      subject: count === 1 ? 'You have a new voter to contact' : `You have ${count} new voters to contact`,
+      text: `${who} assigned you ${voters(count)}.\n\nCheck your list on the cure tracker: ${origin}/\n\nThis email has no voter information in it. Sign in to see who to contact.\n`,
+      html: assignedHtml(who, `${origin}/`, count),
     });
     return true;
   } catch (e) {
     console.error('assignment email failed', e instanceof Error ? e.message : e);
-    // Let the next assignment try again.
-    await db.prepare('UPDATE volunteers SET notified_at = NULL WHERE id = ?').bind(to.id).run();
     return false;
   }
 }

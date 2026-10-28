@@ -343,3 +343,22 @@ export interface InviteResult {
   skipped: { email: string; why: 'has_account' | 'too_soon' }[];
   rejected: string[];
 }
+
+// Volunteers with people assigned to them since they were last emailed (the organizer's precincts only), and what a send did.
+export interface Notice {
+  volunteerId: number;
+  email: string;
+  name: string;
+  pending: number;
+  lastEmailedAt: string | null;
+}
+
+export interface NoticeList {
+  notices: Notice[];
+  emailReady: boolean;
+}
+
+export interface NoticeResult {
+  sent: boolean;
+  count: number;
+}

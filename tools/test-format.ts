@@ -49,6 +49,7 @@ assert.equal(say('settings', { graceCycles: { from: 1, to: 2 } }), 'set the grac
 assert.equal(say('settings', { graceCycles: { from: 2, to: 1 } }), 'set the grace period to 1 upload (was 2)');
 assert.equal(say('reset', { people: 40, notes: 1, uploads: 2 }), 'deleted all voters (40 people, 1 note, 2 uploads)');
 assert.equal(say('volunteer.join'), 'signed in for the first time');
+assert.equal(say('notify.send', { volunteer: 1, count: 3 }), 'emailed Vera Vale about 3 new people');
 assert.equal(say('invite.send', { email: 'a@example.com' }), 'emailed sign-in instructions to a@example.com');
 assert.equal(say('volunteer.rename', { from: '', to: 'Vera Vale' }), 'now called Vera Vale');
 assert.equal(say('something.new'), 'something new', 'an action nobody wrote words for is still readable');

@@ -287,7 +287,7 @@ export const mayOrganize = (me: Me, precinct: string): boolean => {
   return me.organizes.precincts.some((p) => p.toLowerCase() === want);
 };
 
-// "Assign to": pick a volunteer and give them this person. The volunteer is emailed (once in a while; worker/mail.ts), so the button says so.
+// "Assign to": pick a volunteer and give them this person. The volunteer is not emailed here: an admin sends one email for a batch from the Admin page (worker/mail.ts).
 export function assignBox(p: Person, volunteers: Volunteer[], assigned: (p: Person, to: Volunteer) => void | Promise<void>): HTMLElement {
   const pick = h(
     'select',
@@ -305,7 +305,7 @@ export function assignBox(p: Person, volunteers: Volunteer[], assigned: (p: Pers
         if (!to) return;
         try {
           await api<Person>('POST', `/api/admin/people/${p.id}/assign`, { volunteerId: to.id });
-          toast(`${personName(p)} is on ${volunteerName(to)}'s list now.`);
+          toast(`${personName(p)} is on ${volunteerName(to)}'s list now. They are not emailed until you send it from the Admin page.`);
           await assigned(p, to);
         } catch (e) {
           toast(failureText(e), 'error');

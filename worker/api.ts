@@ -14,6 +14,8 @@ import type {
   Me,
   MergePair,
   Note,
+  NoticeList,
+  NoticeResult,
   OrganizerGrant,
   OrganizerList,
   PeoplePage,
@@ -30,7 +32,7 @@ import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { invite, MAX_PER_REQUEST, parseEmails } from './invites.ts';
-import { type Mailer, notifyAssigned } from './mail.ts';
+import { type Mailer, sendAssignmentNotice } from './mail.ts';
 import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import { allGrants, type Grant, inScope, parseGrant, replaceGrant, type Scope, scopeOf, scopeWhere } from './organizers.ts';
@@ -520,7 +522,9 @@ async function claim(c: Ctx, p: string[]): Promise<Response> {
   const id = idOf(p[0]);
   // One statement does the check and the claim, so two volunteers cannot both win.
   const res = await c.db
-    .prepare("UPDATE people SET assigned_to = ?, updated_at = ? WHERE id = ? AND assigned_to IS NULL AND status != 'cured'")
+    .prepare(
+      "UPDATE people SET assigned_to = ?, notify_pending = 0, updated_at = ? WHERE id = ? AND assigned_to IS NULL AND status != 'cured'",
+    )
     .bind(c.me.id, c.now, id)
     .run();
   if (res.meta.changes === 0) {
@@ -540,7 +544,7 @@ async function release(c: Ctx, p: string[]): Promise<Response> {
   mayChange(c, row);
   if (row.assigned_to === null) return json(toPerson(row, c.today));
   await c.db.batch([
-    c.db.prepare('UPDATE people SET assigned_to = NULL, updated_at = ? WHERE id = ?').bind(c.now, id),
+    c.db.prepare('UPDATE people SET assigned_to = NULL, notify_pending = 0, updated_at = ? WHERE id = ?').bind(c.now, id),
     auditStmt(c, 'release', id, { from: row.assigned_to }),
   ]);
   return json(toPerson(await personRow(c, id), c.today));
@@ -933,13 +937,18 @@ async function assign(c: Ctx, p: string[], body: Body): Promise<Response> {
   const row = await personRow(c, id);
   mayOrganize(c, row);
   if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
-  const target = to === null ? null : await volunteerById(c, to);
+  if (to !== null) await volunteerById(c, to);
+  // Someone else's list gets a new person: mark it, so the admin page offers to tell them. Giving a person to the volunteer who has them
+  // already changes nothing, and giving to yourself or the pool clears the mark.
+  const toldLater = to !== null && to !== c.me.id && to !== row.assigned_to ? 1 : 0;
   await c.db.batch([
-    c.db.prepare('UPDATE people SET assigned_to = ?, updated_at = ? WHERE id = ?').bind(to, c.now, id),
+    c.db
+      .prepare(
+        'UPDATE people SET assigned_to = ?, notify_pending = CASE WHEN ? THEN 1 WHEN assigned_to IS ? THEN notify_pending ELSE 0 END, updated_at = ? WHERE id = ?',
+      )
+      .bind(to, toldLater, to, c.now, id),
     auditStmt(c, 'assign', id, { from: row.assigned_to, to }),
   ]);
-  // Tell the volunteer, unless they assigned themselves or already had this person.
-  if (target && target.id !== c.me.id && row.assigned_to !== target.id) await notifyAssigned(c.db, c.mailer, target, c.me, c.origin, c.at);
   return json(toPerson(await personRow(c, id), c.today));
 }
 
@@ -967,8 +976,10 @@ async function reassignAll(c: Ctx, p: string[], body: Body): Promise<Response> {
   // An organizer moves only the people of their own precincts.
   const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'precinct');
   const res = await c.db
-    .prepare(`UPDATE people SET assigned_to = ?, updated_at = ? WHERE assigned_to = ? AND status != 'cured' AND ${only.sql}`)
-    .bind(to, c.now, from, ...only.binds)
+    .prepare(
+      `UPDATE people SET assigned_to = ?, notify_pending = ?, updated_at = ? WHERE assigned_to = ? AND status != 'cured' AND ${only.sql}`,
+    )
+    .bind(to, to !== null && to !== c.me.id ? 1 : 0, c.now, from, ...only.binds)
     .run();
   await auditStmt(c, 'reassign', null, {
     from,
@@ -977,6 +988,46 @@ async function reassignAll(c: Ctx, p: string[], body: Body): Promise<Response> {
     ...(c.scope?.all === false && { precincts: c.scope.precincts }),
   }).run();
   return json({ moved: res.meta.changes });
+}
+
+// ---- telling volunteers about the people assigned to them (one email each, sent by hand)
+async function listNotices(c: Ctx): Promise<Response> {
+  const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'p.precinct');
+  const { results } = await c.db
+    .prepare(
+      `SELECT v.id, v.email, v.name, v.notified_at, COUNT(*) AS n FROM people p JOIN volunteers v ON v.id = p.assigned_to
+       WHERE p.notify_pending = 1 AND p.status != 'cured' AND ${only.sql}
+       GROUP BY v.id ORDER BY v.name COLLATE NOCASE, v.email`,
+    )
+    .bind(...only.binds)
+    .all<{ id: number; email: string; name: string; notified_at: string | null; n: number }>();
+  const list: NoticeList = {
+    notices: results.map((r) => ({ volunteerId: r.id, email: r.email, name: r.name, pending: r.n, lastEmailedAt: r.notified_at })),
+    emailReady: c.mailer !== undefined,
+  };
+  return json(list);
+}
+
+// Emails the volunteer once about everyone newly assigned to them in the caller's precincts, then clears the marks of exactly those people.
+async function sendNotice(c: Ctx, p: string[]): Promise<Response> {
+  if (!c.mailer) throw new HttpError(503, 'Email is not set up yet (docs/setup.md, section 8)');
+  const to = await volunteerById(c, idOf(p[0]));
+  const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'precinct');
+  const { results } = await c.db
+    .prepare(`SELECT id FROM people WHERE assigned_to = ? AND notify_pending = 1 AND status != 'cured' AND ${only.sql}`)
+    .bind(to.id, ...only.binds)
+    .all<{ id: number }>();
+  if (results.length === 0) return json({ sent: false, count: 0 } satisfies NoticeResult);
+  if (!(await sendAssignmentNotice(c.mailer, to, c.me, results.length, c.origin)))
+    throw new HttpError(502, `Could not email ${to.email}. Try again later.`);
+  await c.db.batch([
+    c.db
+      .prepare('UPDATE people SET notify_pending = 0 WHERE notify_pending = 1 AND id IN (SELECT value FROM json_each(?))')
+      .bind(JSON.stringify(results.map((r) => r.id))),
+    c.db.prepare('UPDATE volunteers SET notified_at = ? WHERE id = ?').bind(c.now, to.id),
+    auditStmt(c, 'notify.send', null, { volunteer: to.id, count: results.length }),
+  ]);
+  return json({ sent: true, count: results.length } satisfies NoticeResult);
 }
 
 // ---- inviting people who have no account yet (worker/invites.ts)
@@ -1140,6 +1191,8 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/uploads$/, level: 'admin', handler: adminUploads },
   { method: 'GET', pattern: /^\/api\/admin\/organizers$/, level: 'admin', handler: listOrganizers },
   { method: 'PUT', pattern: /^\/api\/admin\/volunteers\/(\d+)\/organizer$/, level: 'admin', handler: setOrganizer },
+  { method: 'GET', pattern: /^\/api\/admin\/notices$/, level: 'organizer', handler: listNotices },
+  { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/notify$/, level: 'organizer', handler: sendNotice },
   { method: 'GET', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: listInvites },
   { method: 'POST', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: postInvites },
   { method: 'POST', pattern: /^\/api\/admin\/invites\/(\d+)\/resend$/, level: 'admin', handler: resendInvite },
