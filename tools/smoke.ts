@@ -363,7 +363,7 @@ try {
     await admin.getByRole('button', { name: 'Nobody is waiting' }).isDisabled(),
     'with nobody waiting the button is off',
   );
-  await admin.getByText('The geocoder could not place (1)').click();
+  await admin.getByText('Places to check by hand (1)').click();
   const unplacedTable = admin.getByRole('region', { name: 'People the geocoder could not place' });
   const unplacedRow = unplacedTable.getByRole('row', { name: /Nora Nowhere/ });
   await unplacedRow.waitFor();

@@ -31,7 +31,7 @@ import type { IncomingPerson } from '../src/sheet.ts';
 import { FIELDS } from '../src/sheet.ts';
 import type { Db, Stmt, Value } from './db.ts';
 import { type ExportNote, type ExportPerson, exportCsv } from './export.ts';
-import { censusLine, GeocodeError, geocodeChunk, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
+import { censusLine, GeocodeError, geocodeChunk, HAND_LIST, placeByHand, unplacedPeople, waitingForGeocode } from './geocode.ts';
 import { invite, MAX_PER_REQUEST, parseEmails } from './invites.ts';
 import { type Mailer, sendAssignmentNotice } from './mail.ts';
 import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
@@ -426,7 +426,7 @@ async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Pro
   const clause = where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`;
   const { results } = await c.db
     .prepare(
-      `${near ? `${PERSON_COLUMNS}, p.approximate AS approximate, ${near.away} AS away\n  FROM people p` : PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`,
+      `${near ? `${PERSON_COLUMNS}, (p.approximate = 1 OR p.placed_by IS NOT NULL) AS approximate, ${near.away} AS away\n  FROM people p` : PERSON_SELECT}${clause} ORDER BY ${order} LIMIT ? OFFSET ?`,
     )
     .bind(...binds, limit + 1, offset)
     .all<PersonRow>();
@@ -614,7 +614,8 @@ async function adminStats(c: Ctx): Promise<Response> {
          COALESCE(SUM(status != 'cured' AND placed_by IS NOT NULL), 0) AS by_hand,
          COALESCE(SUM(status != 'cured' AND approximate = 1), 0) AS roughly,
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie') AND lat IS NULL), 0) AS nowhere,
-         COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated
+         COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated,
+         COALESCE(SUM(${HAND_LIST}), 0) AS listed
        FROM people WHERE ${only.sql}`,
     )
     .bind(...only.binds)
@@ -631,6 +632,7 @@ async function adminStats(c: Ctx): Promise<Response> {
       by_hand: number;
       nowhere: number;
       unlocated: number;
+      listed: number;
     }>();
   const sample = c.isAdmin ? (await waitingForGeocode(c.db, 0, 3)).map(censusLine) : [];
   const volunteers = await c.db
@@ -701,6 +703,7 @@ async function adminStats(c: Ctx): Promise<Response> {
       noPlace: totals?.nowhere ?? 0,
       byHand: totals?.by_hand ?? 0,
       unmatched: totals?.unlocated ?? 0,
+      listed: totals?.listed ?? 0,
       sample,
     },
   };
@@ -867,12 +870,13 @@ async function geocode(c: Ctx, _p: string[], body: Body): Promise<Response> {
   }
 }
 
-// The people the geocoder could not place, 50 at a time, for an admin to look up by hand.
+// The people the geocoder could not place or only guessed, 50 at a time, optionally matching `q`, for an admin to look up by hand.
 async function unplaced(c: Ctx, _p: string[], _body: Body, url: URL): Promise<Response> {
   const raw = url.searchParams.get('after');
   const after = raw === null || raw === '' ? 0 : Number(raw);
   if (!Number.isSafeInteger(after) || after < 0) throw new HttpError(400, 'after must be a person id');
-  return json(await unplacedPeople(c.db, after));
+  const q = (url.searchParams.get('q') ?? '').trim().slice(0, 100);
+  return json(await unplacedPeople(c.db, after, q === '' ? '%' : containing(q)));
 }
 
 async function uploadColumns(c: Ctx): Promise<Response> {
@@ -1124,6 +1128,17 @@ async function exportWorked(c: Ctx): Promise<Response> {
   });
 }
 
+// Takes someone off the invited list (a typo, or someone who will not join). It does not touch an account or the Access policy.
+async function removeInvite(c: Ctx, p: string[]): Promise<Response> {
+  const row = await c.db.prepare('SELECT email FROM invites WHERE id = ?').bind(idOf(p[0])).first<{ email: string }>();
+  if (!row) throw new HttpError(404, 'No such invite');
+  await c.db.batch([
+    c.db.prepare('DELETE FROM invites WHERE id = ?').bind(idOf(p[0])),
+    auditStmt(c, 'invite.remove', null, { email: row.email }),
+  ]);
+  return json({ removed: row.email });
+}
+
 // Who organizes what, for the admin page: every volunteer's grant, and the precincts the open people are in (to spot a grant that no longer matches).
 async function listOrganizers(c: Ctx): Promise<Response> {
   const grants = await allGrants(c.db);
@@ -1236,6 +1251,7 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: listInvites },
   { method: 'POST', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: postInvites },
   { method: 'POST', pattern: /^\/api\/admin\/invites\/(\d+)\/resend$/, level: 'admin', handler: resendInvite },
+  { method: 'POST', pattern: /^\/api\/admin\/invites\/(\d+)\/remove$/, level: 'admin', handler: removeInvite },
   { method: 'GET', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: getSettings },
   { method: 'PUT', pattern: /^\/api\/admin\/settings$/, level: 'admin', handler: putSettings },
   { method: 'POST', pattern: /^\/api\/admin\/reset$/, level: 'admin', handler: reset },

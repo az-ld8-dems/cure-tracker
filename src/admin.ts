@@ -546,7 +546,7 @@ if (me && !me.isAdmin && !me.organizes) {
             { class: 'fl-stack fl-stack--3' },
             table(
               'People invited',
-              ['Email', 'Status', 'Invited by', 'Last sent', h('span', { class: 'fl-sr-only' }, 'Send again')],
+              ['Email', 'Status', 'Invited by', 'Last sent', h('span', { class: 'fl-sr-only' }, 'Actions')],
               list.invites.map((i) => {
                 const [badgeClass, badgeText] = INVITE_BADGES[i.status];
                 return [
@@ -554,18 +554,40 @@ if (me && !me.isAdmin && !me.organizes) {
                   h('span', { class: badgeClass }, badgeText),
                   i.invitedBy,
                   i.lastSentAt ? dateTime(i.lastSentAt) : 'Never',
-                  i.status === 'signed_in'
-                    ? ''
-                    : h(
-                        'button',
-                        {
-                          class: 'fl-btn fl-btn--sm',
-                          type: 'button',
-                          'aria-label': `Send instructions again to ${i.email}`,
-                          onclick: () => void send(`/api/admin/invites/${i.id}/resend`, {}),
+                  h(
+                    'span',
+                    { class: 'fl-cluster' },
+                    i.status === 'signed_in'
+                      ? null
+                      : h(
+                          'button',
+                          {
+                            class: 'fl-btn fl-btn--sm',
+                            type: 'button',
+                            'aria-label': `Send instructions again to ${i.email}`,
+                            onclick: () => void send(`/api/admin/invites/${i.id}/resend`, {}),
+                          },
+                          'Send again',
+                        ),
+                    h(
+                      'button',
+                      {
+                        class: 'fl-btn fl-btn--sm',
+                        type: 'button',
+                        'aria-label': `Remove ${i.email} from the invited list`,
+                        onclick: async () => {
+                          try {
+                            await api('POST', `/api/admin/invites/${i.id}/remove`, {});
+                            toast(`Removed ${i.email} from the list. Their Access entry, if any, is unchanged.`);
+                            await reloadInvites();
+                          } catch (e) {
+                            toast(failureText(e), 'error');
+                          }
                         },
-                        'Send again',
-                      ),
+                      },
+                      'Remove',
+                    ),
+                  ),
                 ];
               }),
             ),
@@ -818,7 +840,8 @@ if (me && !me.isAdmin && !me.organizes) {
     const rows = h('div', { class: 'fl-stack fl-stack--3' });
     let shown: UnplacedPage['people'] = [];
     let loaded = false;
-    const WHY = { no_match: 'No match', tie: 'More than one place' } as const;
+    let query = '';
+    const WHY = { no_match: 'No match', tie: 'More than one place', rough: 'Close match, not exact' } as const;
     // "33.4295, -111.9628" as a map shows it (latitude first), or null.
     function parsePlace(text: string): { lat: number; lon: number } | null {
       const nums = (text.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
@@ -875,12 +898,12 @@ if (me && !me.isAdmin && !me.organizes) {
       );
     }
     async function loadMore(after: number): Promise<void> {
-      const page = await api<UnplacedPage>('GET', `/api/admin/geocode/unplaced?after=${after}`);
+      const page = await api<UnplacedPage>('GET', `/api/admin/geocode/unplaced?after=${after}&q=${encodeURIComponent(query)}`);
       shown = [...shown, ...page.people];
       clear(
         rows,
         shown.length === 0
-          ? h('p', { class: 'fl-help' }, 'Everyone has a place.')
+          ? h('p', { class: 'fl-help' }, query === '' ? 'Everyone has a place.' : 'Nobody on the list matches that.')
           : table(
               'People the geocoder could not place',
               ['Person', 'Address', 'Why', 'For now', 'Place by hand', h('span', { class: 'fl-sr-only' }, 'Copy')],
@@ -888,7 +911,7 @@ if (me && !me.isAdmin && !me.organizes) {
                 p.name,
                 addressText(p.address),
                 WHY[p.reason],
-                p.byHand ? 'Placed by hand' : p.approximate ? 'Middle of their ZIP' : 'No place',
+                p.byHand ? 'Placed by hand' : p.reason === 'rough' ? 'A guessed place' : p.approximate ? 'Middle of their ZIP' : 'No place',
                 placeBox(p),
                 h(
                   'button',
@@ -930,18 +953,41 @@ if (me && !me.isAdmin && !me.organizes) {
       link.remove();
       URL.revokeObjectURL(link.href);
     }
+    const searchInput = h('input', {
+      class: 'fl-input',
+      type: 'search',
+      autocomplete: 'off',
+      'aria-label': 'Search the list by name or address',
+      placeholder: 'Name or address',
+    });
+    const searchForm = h(
+      'form',
+      {
+        class: 'fl-cluster',
+        role: 'search',
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          query = searchInput.value.trim();
+          shown = [];
+          void loadMore(0);
+        },
+      },
+      searchInput,
+      h('button', { class: 'fl-btn', type: 'submit' }, 'Search'),
+    );
     const list = h(
       'details',
       { class: 'fl-disclosure' },
-      h('summary', {}, `The geocoder could not place (${g.unmatched})`),
+      h('summary', {}, `Places to check by hand (${g.listed})`),
       h(
         'div',
         { class: 'fl-stack fl-stack--3' },
         h(
           'p',
           { class: 'fl-help' },
-          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo. To place one by hand, look the address up on a map and write latitude, then longitude, in the box (a right-click on Google Maps or Apple Maps gives both). Looking them up again also tries the street alone, with no city or ZIP, which finds addresses on a boundary between towns, and accepts the answer only if it is within about 15 miles of the middle of their ZIP. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
+          'People the geocoder could not place, often a PO box, a rural route, a new street or a typo, and people it only guessed (a close match that is not exact, drawn orange on the map), which can land far from the real address. Search by name or address to find one. To place one by hand, look the address up on a map and write latitude, then longitude, in the box (a right-click on Google Maps or Apple Maps gives both). Looking them up again also tries the street alone, with no city or ZIP, which finds addresses on a boundary between towns, and accepts the answer only if it is within about 15 miles of the middle of their ZIP. Until someone looks them up, each is put at the middle of their ZIP (marked approximate) when enough people there were placed.',
         ),
+        searchForm,
         rows,
         h(
           'div',
@@ -988,7 +1034,7 @@ if (me && !me.isAdmin && !me.organizes) {
           : null,
         h('div', { class: 'fl-cluster' }, go, again),
         status,
-        g.unmatched > 0 ? list : null,
+        g.listed > 0 ? list : null,
       ),
     );
   }

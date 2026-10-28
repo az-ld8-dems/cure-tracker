@@ -152,6 +152,8 @@ export interface AdminStats {
     noPlace: number;
     byHand: number;
     unmatched: number;
+    // The people on the hand-place list: those the geocoder could not place, those it only guessed, and those an admin placed.
+    listed: number;
     sample: string[];
   };
 }
@@ -167,12 +169,12 @@ export interface GeocodeProgress {
   next: number | null;
 }
 
-// A person the geocoder could not place, for an admin to look up by hand.
+// A person the geocoder could not place, or only placed roughly ('rough': a close match, not exact), for an admin to look up by hand.
 export interface UnplacedPerson {
   id: number;
   name: string;
   address: string;
-  reason: 'no_match' | 'tie';
+  reason: 'no_match' | 'tie' | 'rough';
   approximate: boolean;
   // Set when an admin placed this person by hand: where, so it can be corrected or taken away.
   byHand: { lat: number; lon: number } | null;

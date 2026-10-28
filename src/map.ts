@@ -1,5 +1,5 @@
-// "Map": the open pool as pins on a map of LD8. A solid dot is a place the geocoder found (or an admin set); a ring is a guess (the middle of
-// a ZIP, or a match the Census calls non-exact). Pick a pin to see the person and claim them. MapLibre and the PMTiles reader are served from
+// "Map": the open pool as pins on a map of LD8. A solid dot is a place the geocoder found exactly; a ring is a guess (the middle of
+// a ZIP, a match the Census calls non-exact, or a place an admin set by hand). Pick a pin to see the person and claim them. MapLibre and the PMTiles reader are served from
 // /lib (tools/build.sh), the tiles by the Worker from R2, so the page loads nothing from anywhere else. The map is a canvas, so the list on
 // Find people is the way in for anyone who cannot use it.
 import type { GeoJSONSource, MapGeoJSONFeature, Map as MapLibreMap } from '/lib/maplibre-gl.js';
@@ -83,7 +83,12 @@ if (me) {
     'ul',
     { class: 'map-legend', 'aria-label': 'Legend' },
     h('li', {}, h('span', { class: 'pin', 'aria-hidden': 'true' }), 'Address found'),
-    h('li', {}, h('span', { class: 'pin pin--guess', 'aria-hidden': 'true' }), 'Place is a guess (the middle of a ZIP, or a rough match)'),
+    h(
+      'li',
+      {},
+      h('span', { class: 'pin pin--guess', 'aria-hidden': 'true' }),
+      'Place is a guess (the middle of a ZIP, a rough match, or one an admin set by hand)',
+    ),
     h('li', {}, h('span', { class: 'pin pin--claimed', 'aria-hidden': 'true' }), 'Yellow, outlined: a volunteer has them'),
     h(
       'li',

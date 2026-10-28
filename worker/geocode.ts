@@ -223,22 +223,26 @@ interface UnplacedRow {
   first_name: string;
   last_name: string;
   address: string;
-  geocode: 'no_match' | 'tie';
+  geocode: 'match' | 'no_match' | 'tie';
   approximate: number;
   placed_by: string | null;
   lat: number | null;
   lon: number | null;
 }
 
-// Open people the geocoder could not place, 50 at a time after `after`, for an admin to look up by hand. `approximate` says they have the
-// middle of their ZIP in the meantime.
-export async function unplacedPeople(db: Db, after: number): Promise<UnplacedPage> {
+// Who the admin's hand-place list holds: open people the geocoder could not place, and open people it placed only roughly (a Non_Exact match,
+// which can land well off) or that an admin placed by hand, so a wrong guess can be corrected.
+export const HAND_LIST = `status != 'cured' AND (geocode IN ('no_match', 'tie') OR (geocode = 'match' AND (approximate = 1 OR placed_by IS NOT NULL)))`;
+
+// That list, 50 at a time after `after`, optionally only the people whose name or address contains `like` (a LIKE pattern, ESCAPE '\').
+// `approximate` says they have a guess for now.
+export async function unplacedPeople(db: Db, after: number, like = '%'): Promise<UnplacedPage> {
   const { results } = await db
     .prepare(
       `SELECT id, first_name, last_name, address, geocode, approximate, placed_by, lat, lon FROM people
-       WHERE id > ?1 AND status != 'cured' AND geocode IN ('no_match', 'tie') ORDER BY id LIMIT ?2`,
+       WHERE id > ?1 AND ${HAND_LIST} AND (first_name || ' ' || last_name || ' ' || address) LIKE ?3 ESCAPE '\\' ORDER BY id LIMIT ?2`,
     )
-    .bind(after, UNPLACED_PAGE + 1)
+    .bind(after, UNPLACED_PAGE + 1, like)
     .all<UnplacedRow>();
   const page = results.slice(0, UNPLACED_PAGE);
   return {
@@ -246,7 +250,7 @@ export async function unplacedPeople(db: Db, after: number): Promise<UnplacedPag
       id: r.id,
       name: `${r.first_name} ${r.last_name}`,
       address: r.address,
-      reason: r.geocode,
+      reason: r.geocode === 'match' ? 'rough' : r.geocode,
       approximate: r.approximate === 1,
       byHand: r.placed_by !== null && r.lat !== null && r.lon !== null ? { lat: r.lat, lon: r.lon } : null,
     })),
