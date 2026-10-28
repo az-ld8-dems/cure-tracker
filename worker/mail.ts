@@ -107,3 +107,29 @@ export async function sendFeedback(mailer: Mailer, by: Assigner, page: string, m
     return false;
   }
 }
+
+// Tells the site's address that invitations went out, so the Access policy can be updated: the site turns away anyone who is not on it, and
+// sending an invitation does not add them. Best effort: a failure is logged and the invitations stand.
+export async function sendInviteReminder(mailer: Mailer, by: Assigner, invited: string[], origin: string): Promise<void> {
+  const who = by.name === '' ? by.email : `${by.name} (${by.email})`;
+  const lines = invited.map((email) => `  ${email}`).join('\n');
+  const count = invited.length === 1 ? 'one person' : `${invited.length} people`;
+  try {
+    await mailer.send({
+      from: FROM,
+      to: FEEDBACK_TO,
+      replyTo: by.email,
+      subject:
+        invited.length === 1 ? `Add ${invited[0] ?? ''} to Cloudflare Access` : `Add ${invited.length} invited people to Cloudflare Access`,
+      text: `${who} just emailed sign-in instructions to ${count}:\n\n${lines}\n\nThe site turns them away until their addresses are on the Cloudflare Access policy. If you have not added them yet, do it now. The admin page has a button that copies the addresses: ${origin}/admin/\n`,
+      html: emailShell(
+        `<p style="margin:0 0 16px"><strong>${escapeHtml(who)}</strong> just emailed sign-in instructions to ${count}:</p>
+<p style="margin:0 0 16px">${invited.map(escapeHtml).join('<br>')}</p>
+<p style="margin:0 0 24px">The site turns them away until their addresses are on the Cloudflare Access policy. If you have not added them yet, do it now.</p>
+${emailButton(`${origin}/admin/`, 'Open the admin page')}`,
+      ),
+    });
+  } catch (e) {
+    console.error('invite reminder failed', e instanceof Error ? e.message : e);
+  }
+}

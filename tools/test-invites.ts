@@ -6,7 +6,7 @@ import type { AuditEntry, InviteList, InviteResult } from '../src/api.d.ts';
 import type { AccessVerifier } from '../worker/access.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { inviteMessage, MAX_PER_REQUEST, parseEmails, RESEND_MS } from '../worker/invites.ts';
-import { FROM, type Mailer } from '../worker/mail.ts';
+import { FEEDBACK_TO, FROM, type Mailer } from '../worker/mail.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
 
 console.warn = () => {};
@@ -23,11 +23,17 @@ assert.deepEqual(parseEmails('just names here').emails, []);
 
 const sqlite = migratedDb();
 const sent: Parameters<Mailer['send']>[0][] = [];
+// What went to the site's own address (the reminder to add people to Access), kept apart from the invitations.
+const reminders: Parameters<Mailer['send']>[0][] = [];
 let failing = false;
+let reminderFails = false;
 const mailer: Mailer = {
   send: async (m) => {
     if (failing) throw new Error('mail is down');
-    sent.push(m);
+    if (m.to === FEEDBACK_TO) {
+      if (reminderFails) throw new Error('reminder failed');
+      reminders.push(m);
+    } else sent.push(m);
   },
 };
 const env: AppEnv = {
@@ -82,6 +88,17 @@ assert.match(mail?.html ?? '', /<a href="https:\/\/cure\.example\/"[^>]*>Open th
 assert.match(mail?.html ?? '', /type exactly this one: <strong>olga@example\.com<\/strong>/);
 assert.equal(inviteMessage('a<b@x.co', { name: '<i>', email: 'e@x.co' }, 'https://h').html.includes('<i>'), false, 'names are escaped');
 
+// The site's own address gets one reminder for the batch, naming only the addresses that were sent (not the skipped), with a way back to the admin page.
+assert.equal(reminders.length, 1);
+assert.equal(reminders[0]?.subject, 'Add olga@example.com to Cloudflare Access');
+assert.equal(reminders[0]?.replyTo, 'boss@example.com');
+assert.match(
+  reminders[0]?.text ?? '',
+  /Bea Boss \(boss@example\.com\) just emailed sign-in instructions to one person:\n\n {2}olga@example\.com\n/,
+);
+assert.ok(!(reminders[0]?.text ?? '').includes('vera@example.com'));
+assert.match(reminders[0]?.html ?? '', /href="https:\/\/cure\.example\/admin\/"/);
+
 // The list: waiting until she signs in, then signed in.
 const list = await invites();
 assert.equal(list.emailReady, true);
@@ -120,6 +137,16 @@ assert.equal(
 );
 assert.equal((await call('boss@example.com', 'POST', `/api/admin/invites/${raeId}/remove`, {})).status, 404);
 
+// No reminder when nothing went out, and a reminder that fails does not undo the invitation.
+const beforeReminders = reminders.length;
+assert.deepEqual(((await post('vera@example.com')).data as InviteResult).sent, []);
+assert.equal(reminders.length, beforeReminders);
+reminderFails = true;
+assert.deepEqual(((await post('sam@example.com')).data as InviteResult).sent, ['sam@example.com']);
+reminderFails = false;
+assert.equal(reminders.length, beforeReminders);
+sent.pop();
+
 // A failing mailer: nothing is lost, the invite shows as not sent, and a later try works at once.
 failing = true;
 const bad = (await post('quinn@example.com')).data as InviteResult;
@@ -136,7 +163,14 @@ assert.equal(((await call('boss@example.com', 'GET', '/api/admin/invites', undef
 // Every send is in the audit log, once, and the failed one is not.
 const log = (await call('boss@example.com', 'GET', '/api/admin/audit?limit=200')).data as AuditEntry[];
 const audited = log.filter((e) => e.action === 'invite.send').map((e) => (e.detail as { email: string }).email);
-assert.deepEqual(audited.sort(), ['olga@example.com', 'pia@example.com', 'pia@example.com', 'quinn@example.com', 'rae@example.com']);
+assert.deepEqual(audited.sort(), [
+  'olga@example.com',
+  'pia@example.com',
+  'pia@example.com',
+  'quinn@example.com',
+  'rae@example.com',
+  'sam@example.com',
+]);
 assert.deepEqual(
   log.filter((e) => e.action === 'invite.remove').map((e) => (e.detail as { email: string }).email),
   ['rae@example.com'],
