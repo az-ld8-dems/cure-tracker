@@ -364,3 +364,21 @@ export interface NoticeResult {
   sent: boolean;
   count: number;
 }
+
+// A person with no phone number on the state's sheet (or whose number an organizer or admin typed in), for finding one some other way.
+export interface MissingPhonePerson {
+  id: number;
+  name: string;
+  address: string;
+  precinct: string;
+  // The number typed in by hand, so it can be corrected or taken away; '' when there is none.
+  phone: string;
+  byHand: boolean;
+}
+
+export interface MissingPhonePage {
+  people: MissingPhonePerson[];
+  next: number | null;
+  // Everyone on the list, whatever page and search.
+  total: number;
+}

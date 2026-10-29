@@ -37,6 +37,7 @@ import { type Mailer, sendAssignmentNotice, sendFeedback, sendInviteReminder } f
 import { boxOf, pinsIn, STALLED_DAYS } from './map.ts';
 import { awayMiles, homeOf, inCountry, nearestTown, nearSql, type Place, roundPlace, zipCenter } from './near.ts';
 import { allGrants, type Grant, inScope, parseGrant, replaceGrant, type Scope, scopeOf, scopeWhere } from './organizers.ts';
+import { missingPhones, normalizePhone } from './phones.ts';
 import {
   finishStage,
   graceCycles,
@@ -900,6 +901,42 @@ async function unplaced(c: Ctx, _p: string[], _body: Body, url: URL): Promise<Re
   return json(await unplacedPeople(c.db, after, q === '' ? '%' : containing(q)));
 }
 
+// The open people with no phone number, 50 at a time, optionally matching `q`, in the caller's precincts.
+async function missingPhoneList(c: Ctx, _p: string[], _body: Body, url: URL): Promise<Response> {
+  const raw = url.searchParams.get('after');
+  const after = raw === null || raw === '' ? 0 : Number(raw);
+  if (!Number.isSafeInteger(after) || after < 0) throw new HttpError(400, 'after must be a person id');
+  const q = (url.searchParams.get('q') ?? '').trim().slice(0, 100);
+  return json(await missingPhones(c.db, c.scope ?? { all: false, precincts: [] }, after, q === '' ? '%' : containing(q)));
+}
+
+// Types in (or, with clear, takes away) a phone number found some other way, for someone whose row on the sheet has none. A number from the
+// sheet is not changed here. The log says which person and who, not the number.
+async function setPhone(c: Ctx, p: string[], body: Body): Promise<Response> {
+  const id = idOf(p[0]);
+  const row = await personRow(c, id);
+  mayOrganize(c, row);
+  if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
+  const current = await c.db.prepare('SELECT phone_by FROM people WHERE id = ?').bind(id).first<{ phone_by: string | null }>();
+  const byHand = (current?.phone_by ?? null) !== null;
+  if (row.phone !== '' && !byHand) throw new HttpError(409, `${nameOf(row)} already has a phone number from the state's sheet`);
+  if (body.clear === true) {
+    if (!byHand) throw new HttpError(409, 'There is no entered phone number to take away');
+    await c.db.batch([
+      c.db.prepare("UPDATE people SET phone = '', phone_by = NULL, updated_at = ? WHERE id = ?").bind(c.now, id),
+      auditStmt(c, 'person.unphone', id),
+    ]);
+  } else {
+    const phone = normalizePhone(text(body, 'phone', 40));
+    if (phone === null) throw new HttpError(400, 'Write a ten-digit phone number, like 480-555-0123');
+    await c.db.batch([
+      c.db.prepare('UPDATE people SET phone = ?, phone_by = ?, updated_at = ? WHERE id = ?').bind(phone, c.me.email, c.now, id),
+      auditStmt(c, 'person.phone', id),
+    ]);
+  }
+  return json(toPerson(await personRow(c, id), c.today));
+}
+
 async function uploadColumns(c: Ctx): Promise<Response> {
   return json(await savedColumns(c.db));
 }
@@ -1271,6 +1308,8 @@ const routes: Route[] = [
   { method: 'GET', pattern: /^\/api\/admin\/organizers$/, level: 'admin', handler: listOrganizers },
   { method: 'PUT', pattern: /^\/api\/admin\/volunteers\/(\d+)\/organizer$/, level: 'admin', handler: setOrganizer },
   { method: 'GET', pattern: /^\/api\/admin\/export\/worked\.csv$/, level: 'organizer', handler: exportWorked },
+  { method: 'GET', pattern: /^\/api\/admin\/phones\/missing$/, level: 'organizer', handler: missingPhoneList },
+  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/phone$/, level: 'organizer', handler: setPhone },
   { method: 'GET', pattern: /^\/api\/admin\/notices$/, level: 'organizer', handler: listNotices },
   { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/notify$/, level: 'organizer', handler: sendNotice },
   { method: 'GET', pattern: /^\/api\/admin\/invites$/, level: 'admin', handler: listInvites },
