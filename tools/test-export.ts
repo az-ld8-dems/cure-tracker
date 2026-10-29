@@ -92,7 +92,7 @@ assert.equal(
   [
     'Name,Status,Volunteer,Notes',
     '"Lee M Message","Left a message","Dora Doe",""',
-    '"Nora Noted","Needs to be contacted","","2026-10-20 Dora Doe: Wrong number, try email\n2026-10-21 boss@example.com: =1+1 and ""quoted""\nsecond line"',
+    '"Nora Noted","Needs to be contacted","","2026-10-21 boss@example.com: =1+1 and ""quoted""\nsecond line"\n2026-10-20 Dora Doe: Wrong number, try email',
     '"Olga Other","Contacted","boss@example.com",""',
     '',
   ].join('\r\n'),
