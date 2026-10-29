@@ -34,7 +34,10 @@ export const fullName = (p: Pick<ExportPerson, 'first_name' | 'middle_name' | 'l
 export function exportCsv(rows: { person: ExportPerson; notes: ExportNote[] }[]): string {
   const lines = ['Name,Status,Volunteer,Notes'];
   for (const { person, notes } of rows) {
-    const text = notes.reverse().map((n) => `${n.at.slice(0, 10)} ${n.author}: ${n.body}`).join('\n');
+    const text = notes
+      .reverse()
+      .map((n) => `${n.at.slice(0, 10)} ${n.author}: ${n.body}`)
+      .join('\n');
     lines.push([fullName(person), STATUS_TEXT[person.status] ?? person.status, person.volunteer, text].map(csvField).join(','));
   }
   return `${lines.join('\r\n')}\r\n`;
