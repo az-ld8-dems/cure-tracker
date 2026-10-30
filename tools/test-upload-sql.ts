@@ -403,6 +403,7 @@ for (let seed = 1; seed <= 250; seed++) {
       cities: sorted((p) => p.city),
       parties: sorted((p) => p.party),
       precincts: sorted((p) => p.precinct),
+      reasons: sorted((p) => p.reasonCode),
       // A city with no precinct on the sheet has no entry: nothing to narrow to.
       precinctsByCity: Object.fromEntries(
         sorted((p) => p.city)

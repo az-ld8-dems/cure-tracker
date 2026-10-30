@@ -1,6 +1,6 @@
-// The filters Find people and the map share: search, city, precinct, party, and the "Near me" box (where the volunteer is, and how far to
+// The filters Find people and the map share: search, city, precinct, party, reason, and the "Near me" box (where the volunteer is, and how far to
 // look). One module builds both pages' filters, so they look and behave the same and carry over from one page to the other in the address
-// (?q=&city=&precinct=&party=&miles=), which the two pages' links in the header keep up to date.
+// (?q=&city=&precinct=&party=&reason=&miles=), which the two pages' links in the header keep up to date.
 import type { Me, PeoplePage } from './api.d.ts';
 import { api, clear, failureText, field, h, plural, titleCase, toast } from './common.ts';
 
@@ -20,7 +20,7 @@ export interface FilterOptions {
 export interface Filters {
   // The form to put on the page.
   element: HTMLElement;
-  // The query string parts the people and map routes take: q, city, precinct, party and miles.
+  // The query string parts the people and map routes take: q, city, precinct, party, reason and miles.
   params(): URLSearchParams;
   // Whether any filter narrows the people, and a hint when a precinct was typed that is not on the list.
   narrowing(): boolean;
@@ -28,7 +28,7 @@ export interface Filters {
   // The place the volunteer saved, and whether the radius is on.
   place(): Me['location'];
   searchingByDistance(): boolean;
-  // Fills the city, precinct and party choices once the page knows them; the address's filters are applied then.
+  // Fills the city, precinct, party and reason choices once the page knows them; the address's filters are applied then.
   load(facets: Facets): void;
   // Redraws the near-me box (after the page changed the radius or sort itself).
   syncNear(): void;
@@ -86,6 +86,7 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
   // The list of matches floats under the field, so opening it moves nothing else (Frostline's own puts it in the flow).
   const precinctList = h('ul', { class: 'pool-popover' });
   const party = h('select', { class: 'fl-select', id: 'party', onchange: changed });
+  const reason = h('select', { class: 'fl-select', id: 'reason', onchange: changed });
   // "Within N miles" of the place the volunteer saved. A radius is what keeps a search by distance cheap, so sorting by distance needs one.
   const radius = h(
     'select',
@@ -172,6 +173,7 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
       field('city', 'City', city),
       h('div', { class: 'fl-field pool-combo' }, h('label', { class: 'fl-label', for: 'precinct' }, 'Precinct'), precinct, precinctList),
       field('party', 'Party', party),
+      field('reason', 'Reason', reason),
       ...extra,
     ),
   );
@@ -287,7 +289,7 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
   function params(): URLSearchParams {
     const out = new URLSearchParams();
     if (!loaded) {
-      for (const name of ['q', 'city', 'precinct', 'party'] as const) {
+      for (const name of ['q', 'city', 'precinct', 'party', 'reason'] as const) {
         const v = (start.get(name) ?? '').trim();
         if (v !== '') out.set(name, v);
       }
@@ -300,6 +302,7 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
       ['city', city.value],
       ['precinct', knownPrecinct()],
       ['party', party.value],
+      ['reason', reason.value],
       ['miles', place !== null ? radius.value : ''],
     ] as const) {
       if (value !== '') out.set(name, value);
@@ -321,7 +324,7 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
   return {
     element,
     params,
-    narrowing: () => [search.value.trim(), city.value, precinct.value.trim(), party.value].some((v) => v !== ''),
+    narrowing: () => [search.value.trim(), city.value, precinct.value.trim(), party.value, reason.value].some((v) => v !== ''),
     hint: () => (precinct.value.trim() !== '' && knownPrecinct() === '' ? ' Choose a precinct from the list to filter by it.' : ''),
     place: () => place,
     searchingByDistance,
@@ -336,6 +339,9 @@ export function createFilters({ me, onChange, extra = [], onNear }: FilterOption
       fill(party, 'All parties', facets.parties, (v) => v);
       const p = start.get('party') ?? '';
       if (p !== '' && facets.parties.includes(p)) party.value = p;
+      fill(reason, 'All reasons', facets.reasons);
+      const r = start.get('reason') ?? '';
+      if (r !== '' && facets.reasons.includes(r)) reason.value = r;
       window.Frostline.combobox(precinct, {
         mode: 'suggest',
         label: 'Precincts',

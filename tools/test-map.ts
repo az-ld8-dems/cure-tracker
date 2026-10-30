@@ -188,11 +188,13 @@ const common = (column: string): string =>
   );
 const aCity = common('city');
 const aParty = common('party');
+const aReason = common('reason_code');
 const aPrecinct = common('precinct');
 const aLast = String(sqlite.prepare(`SELECT last_name AS v FROM people WHERE ${placedOpen} LIMIT 1`).get()?.v);
 for (const [query, expected] of [
   [`city=${encodeURIComponent(aCity.toLowerCase())}`, sqlIds('city = ? COLLATE NOCASE', aCity)],
   [`party=${encodeURIComponent(aParty)}`, sqlIds('party = ?', aParty)],
+  [`reason=${encodeURIComponent(aReason)}`, sqlIds('reason_code = ?', aReason)],
   [`precinct=${encodeURIComponent(aPrecinct.toLowerCase())}`, sqlIds('precinct = ? COLLATE NOCASE', aPrecinct)],
   [`q=${encodeURIComponent(aLast)}`, sqlIds("(first_name || ' ' || last_name || ' ' || address) LIKE ?", `%${aLast}%`)],
   [`city=${encodeURIComponent(aCity)}&party=${encodeURIComponent(aParty)}`, sqlIds('city = ? COLLATE NOCASE AND party = ?', aCity, aParty)],
