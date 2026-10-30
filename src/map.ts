@@ -94,7 +94,7 @@ if (me) {
       'li',
       {},
       h('span', { class: 'pin pin--stalled', 'aria-hidden': 'true' }),
-      'Red, outlined: a volunteer has them, and nothing has happened for days',
+      'Red, outlined: a volunteer has them and may need a check-in (no update in a few days)',
     ),
     h('li', {}, h('span', { class: 'pin-line', 'aria-hidden': 'true' }), 'Edge of Legislative District 8'),
     youLegend,
