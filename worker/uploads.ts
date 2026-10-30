@@ -20,23 +20,25 @@ export const MATCH_LIMIT = 25;
 // Looking for corrected names compares every person who left with every person who arrived; past this many pairs it is skipped.
 const MATCH_PAIRS_LIMIT = 1_000_000;
 
-// The values the Find people filters offer: the cities, parties and precincts of everyone still open. They only change when an upload
+// The values the Find people filters offer: the cities, parties, precincts and reasons of everyone still open. They only change when an upload
 // does, so the upload stores them (settings.facets) and a page reads one row instead of scanning the people.
 interface Facets {
   cities: string[];
   parties: string[];
   precincts: string[];
+  reasons: string[];
   // The precincts each city has people in, so choosing a city can narrow the precincts offered (a precinct that crosses a city line is under both).
   precinctsByCity: Record<string, string[]>;
 }
 
 const distinct = (values: string[]): string[] => [...new Set(values)].filter((v) => v !== '').sort();
 
-function facetsOf(people: { city: string; party: string; precinct: string }[]): Facets {
+function facetsOf(people: { city: string; party: string; precinct: string; reason_code: string }[]): Facets {
   return {
     cities: distinct(people.map((p) => p.city)),
     parties: distinct(people.map((p) => p.party)),
     precincts: distinct(people.map((p) => p.precinct)),
+    reasons: distinct(people.map((p) => p.reason_code)),
     precinctsByCity: Object.fromEntries(
       distinct(people.map((p) => p.city))
         .map((city) => [city, distinct(people.filter((p) => p.city === city).map((p) => p.precinct))] as const)
@@ -64,18 +66,25 @@ export async function savedFacets(db: Db): Promise<Facets> {
         strings(f.cities) &&
         strings(f.parties) &&
         strings(f.precincts) &&
+        strings(f.reasons) &&
         typeof by === 'object' &&
         by !== null &&
         Object.values(by).every(strings)
       )
-        return { cities: f.cities, parties: f.parties, precincts: f.precincts, precinctsByCity: by as Record<string, string[]> };
+        return {
+          cities: f.cities,
+          parties: f.parties,
+          precincts: f.precincts,
+          reasons: f.reasons,
+          precinctsByCity: by as Record<string, string[]>,
+        };
     }
   } catch {
     // Damaged: work it out again.
   }
   const { results } = await db
-    .prepare("SELECT DISTINCT city, party, precinct FROM people WHERE status != 'cured'")
-    .all<{ city: string; party: string; precinct: string }>();
+    .prepare("SELECT DISTINCT city, party, precinct, reason_code FROM people WHERE status != 'cured'")
+    .all<{ city: string; party: string; precinct: string; reason_code: string }>();
   const facets = facetsOf(results);
   if (results.length > 0) await saveFacets(db, facets).run();
   return facets;
@@ -525,6 +534,7 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
          'cities', json((SELECT json_group_array(city) FROM (SELECT DISTINCT city FROM upload_rows WHERE city != '' ORDER BY city))),
          'parties', json((SELECT json_group_array(party) FROM (SELECT DISTINCT party FROM upload_rows WHERE party != '' ORDER BY party))),
          'precincts', json((SELECT json_group_array(precinct) FROM (SELECT DISTINCT precinct FROM upload_rows WHERE precinct != '' ORDER BY precinct))),
+         'reasons', json((SELECT json_group_array(reason_code) FROM (SELECT DISTINCT reason_code FROM upload_rows WHERE reason_code != '' ORDER BY reason_code))),
          'precinctsByCity', json((SELECT json_group_object(city, json(precincts)) FROM (
             SELECT city, json_group_array(precinct) AS precincts FROM (
               SELECT DISTINCT city, precinct FROM upload_rows WHERE city != '' AND precinct != '' ORDER BY city, precinct) GROUP BY city)))))

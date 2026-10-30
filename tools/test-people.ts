@@ -43,7 +43,12 @@ async function page(as: string, query: string): Promise<PeoplePage> {
 const admin = 'admin@example.com';
 const vera = 'vera@example.com';
 // 120 people in 12 precincts, in the stock sheet's five cities, with status dates spread over twenty days.
-const sheet = syntheticPeople(120).map((p, i) => ({ ...p, precinct: `PRECINCT ${String(i % 12).padStart(2, '0')}` }));
+const REASONS = ['SIGNATURE MISSING', 'SIGNATURE MISMATCH', 'NO SIGNATURE'];
+const sheet = syntheticPeople(120).map((p, i) => ({
+  ...p,
+  precinct: `PRECINCT ${String(i % 12).padStart(2, '0')}`,
+  reason: REASONS[i % 3] ?? '',
+}));
 await uploadCsv(sendAs(admin), sheetCsv(sheet), { filename: 'day1.csv' });
 
 // --- the pool is the default, a page at a time
@@ -72,6 +77,7 @@ assert.equal((await page(vera, '?offset=500')).people.length, 0, 'past the end i
 const withFacets = await page(vera, '?facets=1');
 assert.equal(withFacets.facets?.precincts.length, 12);
 assert.deepEqual(withFacets.facets?.parties, ['DEM', 'IND', 'REP']);
+assert.deepEqual(withFacets.facets?.reasons, [...REASONS].sort());
 assert.ok(withFacets.facets?.cities.includes('Tempe'));
 // Each city's precincts are the ones its people are in, and every precinct is under some city.
 const everyoneOpen = (await page(vera, '?limit=200')).people;
@@ -92,6 +98,10 @@ assert.equal(
   (await page(vera, '?party=IND&limit=200')).people.every((p) => p.party === 'IND'),
   true,
 );
+const mismatch = await page(vera, `?reason=${encodeURIComponent('SIGNATURE MISMATCH')}&limit=200`);
+assert.equal(mismatch.people.length, 40, 'a reason matches whole');
+assert.ok(mismatch.people.every((p) => p.reasonCode === 'SIGNATURE MISMATCH'));
+assert.equal((await page(vera, '?reason=SIGNATURE')).people.length, 0, 'not part of one');
 const named = await page(vera, `?q=${encodeURIComponent(sheet[7]?.last ?? '')}`);
 assert.ok(
   named.people.some((p) => p.lastName === sheet[7]?.last),

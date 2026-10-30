@@ -353,7 +353,7 @@ async function nearOf(c: Ctx, url: URL): Promise<{ where: string; away: string }
   return nearSql(home, miles);
 }
 
-// The city, party, precinct and search filters the list and the map share (city and precinct ignoring case, party exactly, the search as any
+// The city, party, precinct, reason and search filters the list and the map share (city and precinct ignoring case, party and reason exactly, the search as any
 // part of the name and street, and of the phone for those who organize).
 function narrowBy(url: URL, withPhone: boolean): { where: string[]; binds: Value[] } {
   const where: string[] = [];
@@ -367,6 +367,11 @@ function narrowBy(url: URL, withPhone: boolean): { where: string[]; binds: Value
   if (party !== '') {
     where.push('p.party = ?');
     binds.push(party);
+  }
+  const reason = filterParam(url, 'reason');
+  if (reason !== '') {
+    where.push('p.reason_code = ?');
+    binds.push(reason);
   }
   const precinct = filterParam(url, 'precinct');
   if (precinct !== '') {
@@ -386,8 +391,8 @@ function narrowBy(url: URL, withPhone: boolean): { where: string[]; binds: Value
 }
 
 // People, a page at a time. scope=pool (the default) is who still needs a volunteer, scope=mine is the caller's own people, and
-// scope=all (admins) is everyone. sort (days, precinct, city or name) runs the other way with dir=desc. city, precinct (ignoring case)
-// and party match exactly, which the indexes in migration 0003 answer; q (name, street and, for admins, phone) matches any part, which
+// scope=all (admins) is everyone. sort (days, precinct, city or name) runs the other way with dir=desc. city, precinct (ignoring case),
+// party and reason match exactly, which the indexes in migration 0003 answer; q (name, street and, for admins, phone) matches any part, which
 // reads every row that is left after the other filters. There is no count: the page asks for one person more than it shows (hasMore).
 async function listPeople(c: Ctx, _params: string[], _body: Body, url: URL): Promise<Response> {
   const scope = url.searchParams.get('scope') ?? 'pool';

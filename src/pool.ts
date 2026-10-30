@@ -286,7 +286,7 @@ if (me) {
     people = first.people;
     hasMore = first.hasMore;
     lastQuestion = firstQuestion;
-    filters.load(first.facets ?? { cities: [], parties: [], precincts: [], precinctsByCity: {} });
+    filters.load(first.facets ?? { cities: [], parties: [], precincts: [], reasons: [], precinctsByCity: {} });
     clear(app, filters.element, count, table, list, more);
     render();
     // The address's filters can turn the choices into a different question (a radius picks "nearest first").
