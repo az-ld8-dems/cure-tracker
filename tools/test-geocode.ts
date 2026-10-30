@@ -457,6 +457,17 @@ assert.deepEqual(
   [33.429512, admin],
   'a miss keeps the place an admin gave',
 );
+// a rough (Non_Exact) match is not sure enough to replace a place an admin gave
+sqlite.prepare("UPDATE people SET address = '5 NONEXACT ST TEMPE, AZ 85283', geocode = NULL WHERE id = ?").run(nora2);
+census.behavior.matchEverything = true;
+await call(admin, 'POST', '/api/admin/geocode', { after: 0 });
+census.behavior.matchEverything = false;
+assert.deepEqual(
+  Object.values(sqlite.prepare('SELECT lat, lon, geocode, approximate, placed_by FROM people WHERE id = ?').get(nora2) ?? {}),
+  [33.429512, -111.962899, 'match', 0, admin],
+  'a rough match keeps the place an admin gave',
+);
+sqlite.prepare("UPDATE people SET address = '2 NOWHERE LN TEMPE, AZ 85283', geocode = 'no_match' WHERE id = ?").run(nora2);
 // ...but finding the person does: the geocoder's answer is better than a guess made by hand
 census.behavior.matchEverything = true;
 await call(admin, 'POST', '/api/admin/geocode', { after: 0, retry: true });

@@ -62,6 +62,9 @@ const PLACE_BY_ZIP = `
         HAVING COUNT(*) >= ?2) z
   WHERE people.zip = z.zip AND people.status != 'cured' AND people.geocode IN ('no_match', 'tie') AND people.lat IS NULL`;
 
+// A hand-placed person keeps their place unless the Census is sure: an exact match replaces it, a rough one (Non_Exact), a tie or a miss does not.
+const REPLACES_HAND = '(people.placed_by IS NULL OR j.approximate = 0)';
+
 const changed = (result: unknown): number => {
   const meta = (result as { meta?: { changes?: number } } | undefined)?.meta;
   return meta?.changes ?? 0;
@@ -190,9 +193,10 @@ export async function geocodeChunk(
            json_extract(value, '$.lat') AS lat, json_extract(value, '$.lon') AS lon,
            json_extract(value, '$.approximate') AS approximate FROM json_each(?1))
          UPDATE people SET
-           lat = CASE WHEN j.geocode = 'match' THEN j.lat ELSE people.lat END, lon = CASE WHEN j.geocode = 'match' THEN j.lon ELSE people.lon END,
-           approximate = CASE WHEN j.geocode = 'match' THEN j.approximate ELSE people.approximate END,
-           placed_by = CASE WHEN j.geocode = 'match' THEN NULL ELSE people.placed_by END, geocode = j.geocode, geocoded_at = ?2
+           lat = CASE WHEN j.geocode = 'match' AND ${REPLACES_HAND} THEN j.lat ELSE people.lat END,
+           lon = CASE WHEN j.geocode = 'match' AND ${REPLACES_HAND} THEN j.lon ELSE people.lon END,
+           approximate = CASE WHEN j.geocode = 'match' AND ${REPLACES_HAND} THEN j.approximate ELSE people.approximate END,
+           placed_by = CASE WHEN j.geocode = 'match' AND ${REPLACES_HAND} THEN NULL ELSE people.placed_by END, geocode = j.geocode, geocoded_at = ?2
          FROM j WHERE people.id = j.id AND people.address = j.address`,
       )
       .bind(JSON.stringify(answers), now),
@@ -262,7 +266,7 @@ export async function unplacedPeople(db: Db, after: number, like = '%'): Promise
 export type HandPlace = { lat: number; lon: number } | null;
 
 // Puts a person at a place an admin looked up (or, with null, takes a hand-placed person's place away). The geocoder's own verdict stays as it
-// was; the place counts as exact, and is the admin's until the geocoder finds the person or an upload changes their address.
+// was; the place counts as exact, and is the admin's until the geocoder finds the person exactly or an upload changes their address.
 export async function placeByHand(db: Db, actor: string, now: string, id: number, place: HandPlace): Promise<void> {
   await db.batch([
     place
