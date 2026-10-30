@@ -314,18 +314,14 @@ h3 {
   border-radius: var(--radius-lg);
 }
 
-/* The search box, then the other filters in a disclosure. With room, the disclosure's frame and summary go and all five share a row. */
+/* The search box, then the other filters in a disclosure. With room, the disclosure's frame and summary go and the filters share one row under
+   the search box (five on Find people, four on the map). */
 .pool-filters {
   display: grid;
   gap: var(--space-3);
 }
 
 @media (min-width: 48rem) {
-  .pool-filters {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
-    align-items: start;
-  }
-
   .pool-filters > .fl-disclosure:not(.pool-near) {
     padding: 0;
     border: 0;
@@ -335,14 +331,11 @@ h3 {
   .pool-filters > .fl-disclosure:not(.pool-near) > summary {
     display: none;
   }
+}
 
+@media (min-width: 64rem) {
   .pool-filters .fl-toolbar {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  /* Near me is a framed box under the whole row, not tucked under the filters' columns. */
-  .pool-filters > .pool-near {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
