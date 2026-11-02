@@ -187,8 +187,8 @@ if (me) {
           'span',
           { class: 'fl-help', id: `release-help-${p.id}` },
           p.status === 'contacted'
-            ? 'You already reached them, so keep them: they stay on your list and count for you until they are cured. Release is for giving a person up. They leave your list and your counts, and anyone can claim them. Their status, how you reached them and your notes stay on their record.'
-            : 'They leave your list and anyone can claim them. Their status, how you reached them and your notes stay on their record.',
+            ? 'Keep people you have reached: they stay on your list and count for you. Release is for giving someone up. They leave your list and counts, and anyone can claim them.'
+            : 'They leave your list and anyone can claim them. Status and notes stay.',
         ),
       ),
     );
