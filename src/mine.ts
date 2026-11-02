@@ -179,19 +179,31 @@ if (me) {
       field(`method-${p.id}`, 'How did you reach them?', method),
       details,
       h(
-        'button',
-        {
-          class: 'fl-btn fl-btn--sm',
-          type: 'button',
-          onclick: async () => {
-            const updated = await send(`/api/people/${p.id}/release`, {});
-            if (updated) {
-              toast(`${personName(p)} went back to the pool.`);
-              replace(updated);
-            }
+        'div',
+        { class: 'fl-field' },
+        h(
+          'button',
+          {
+            class: 'fl-btn fl-btn--sm',
+            type: 'button',
+            'aria-describedby': `release-help-${p.id}`,
+            onclick: async () => {
+              const updated = await send(`/api/people/${p.id}/release`, {});
+              if (updated) {
+                toast(`${personName(p)} left your list and went back to the pool.`);
+                replace(updated);
+              }
+            },
           },
-        },
-        'Release back to the pool',
+          'Release back to the pool',
+        ),
+        h(
+          'span',
+          { class: 'fl-help', id: `release-help-${p.id}` },
+          p.status === 'contacted'
+            ? 'Keep people you have reached: they stay on your list and count for you. Release is for giving someone up. They leave your list and counts, and anyone can claim them.'
+            : 'They leave your list and anyone can claim them. Status and notes stay.',
+        ),
       ),
       h(
         'div',
