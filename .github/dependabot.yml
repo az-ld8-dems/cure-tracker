@@ -12,6 +12,11 @@ updates:
     # Wait a week after a release before proposing it, so a withdrawn or compromised version is usually gone by then.
     cooldown:
       default-days: 7
+    ignore:
+      # The types follow the Node the project runs on (engines in package.json, the Worker's runtime), so a new major is a decision to
+      # make by hand along with that, not a weekly pull request. Minor and patch updates still come.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # The workflows pin each action by full commit SHA with a version comment; Dependabot updates both together.
   - package-ecosystem: github-actions
