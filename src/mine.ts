@@ -165,19 +165,31 @@ if (me) {
       field(`method-${p.id}`, 'How did you reach them?', method),
       details,
       h(
-        'button',
-        {
-          class: 'fl-btn fl-btn--sm',
-          type: 'button',
-          onclick: async () => {
-            const updated = await send(`/api/people/${p.id}/release`, {});
-            if (updated) {
-              toast(`${personName(p)} went back to the pool.`);
-              replace(updated);
-            }
+        'div',
+        { class: 'fl-field' },
+        h(
+          'button',
+          {
+            class: 'fl-btn fl-btn--sm',
+            type: 'button',
+            'aria-describedby': `release-help-${p.id}`,
+            onclick: async () => {
+              const updated = await send(`/api/people/${p.id}/release`, {});
+              if (updated) {
+                toast(`${personName(p)} left your list and went back to the pool.`);
+                replace(updated);
+              }
+            },
           },
-        },
-        'Release back to the pool',
+          'Release back to the pool',
+        ),
+        h(
+          'span',
+          { class: 'fl-help', id: `release-help-${p.id}` },
+          p.status === 'contacted'
+            ? 'Only release someone you are done with. They leave your list and your counts, and anyone can claim them. Their status, how you reached them and your notes stay on their record.'
+            : 'They leave your list and anyone can claim them. Their status, how you reached them and your notes stay on their record.',
+        ),
       ),
     );
   }
