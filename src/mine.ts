@@ -145,6 +145,20 @@ if (me) {
       notes,
     );
 
+    const asked = h('button', { class: 'fl-btn fl-btn--sm', type: 'button' }, 'Do not contact');
+    window.Frostline.confirm(asked, {
+      message: `${personName(p)} asked not to be contacted?`,
+      confirmLabel: 'Yes, never contact',
+      cancelLabel: 'Keep them',
+      onConfirm: async () => {
+        const updated = await send(`/api/people/${p.id}/do-not-contact`, {});
+        if (updated) {
+          toast(`${personName(p)} is off the list for good.`);
+          replace(updated);
+        }
+      },
+    });
+
     return h(
       'li',
       { class: 'fl-card', 'data-id': String(p.id) },
@@ -178,6 +192,12 @@ if (me) {
           },
         },
         'Release back to the pool',
+      ),
+      h(
+        'div',
+        { class: 'fl-stack fl-stack--3' },
+        asked,
+        h('span', { class: 'fl-help' }, 'For a voter who asks you to stop. They leave every list and stay off after new uploads.'),
       ),
     );
   }

@@ -34,6 +34,10 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
       return 'added a note';
     case 'note.remove':
       return 'removed a note';
+    case 'person.do_not_contact':
+      return 'marked do not contact (they asked not to be contacted)';
+    case 'person.allow_contact':
+      return 'taken off the do-not-contact list';
     case 'assign':
       return `moved from ${volunteer(d.from)} to ${volunteer(d.to)}`;
     case 'reassign':

@@ -164,6 +164,7 @@ interface PersonRow {
   contact_method: ContactMethod | null;
   assigned_to: number | null;
   flag: Person['flag'];
+  do_not_contact: number;
   notes_count: number;
   // In a "within N miles" search: the distance in miles, and whether the place is a guess.
   // The squared distance in miles (nearSql's `away`), when the query was a search by distance.
@@ -172,7 +173,7 @@ interface PersonRow {
 }
 
 const PERSON_COLUMNS = `SELECT p.id, p.first_name, p.middle_name, p.last_name, p.party, p.reason_code, p.phone, p.address, p.city, p.zip,
-    p.precinct, p.status_date, p.status, p.status_changed_at, p.contact_method, p.assigned_to, p.flag,
+    p.precinct, p.status_date, p.status, p.status_changed_at, p.contact_method, p.assigned_to, p.flag, p.do_not_contact,
     (SELECT COUNT(*) FROM notes n WHERE n.person_id = p.id) AS notes_count`;
 const PERSON_SELECT = `${PERSON_COLUMNS}
   FROM people p`;
@@ -197,6 +198,7 @@ function toPerson(r: PersonRow, today: string): Person {
     contactMethod: r.contact_method,
     assignedTo: r.assigned_to,
     flag: r.flag,
+    doNotContact: r.do_not_contact === 1,
     notesCount: r.notes_count,
     ...(r.away === undefined ? {} : { distanceMiles: Math.round(awayMiles(r.away) * 10) / 10, approximate: r.approximate === 1 }),
   };
@@ -306,8 +308,9 @@ async function listVolunteers(c: Ctx): Promise<Response> {
   return json(results);
 }
 
-// The pool: open people nobody has claimed. The partial index people_pool covers exactly this condition, so keep it word for word.
-const POOL_WHERE = "p.assigned_to IS NULL AND p.status != 'cured'";
+// The pool: open people nobody has claimed, and who have not asked not to be contacted. The partial index people_pool covers the condition up to
+// the last term (which only filters what the index finds), so keep the rest word for word.
+const POOL_WHERE = "p.assigned_to IS NULL AND p.status != 'cured' AND p.do_not_contact = 0";
 // Longest uncured first is the earliest status date first, people with no date last. The first term is the expression people_pool indexes.
 const DAYS_ORDER = ["COALESCE(p.status_date, '9999-12-31')", 'p.id'];
 // Each sort as the terms of its ORDER BY, in its natural direction. dir=desc puts DESC on every term, which is the exact reverse (and
@@ -530,13 +533,14 @@ async function claim(c: Ctx, p: string[]): Promise<Response> {
   // One statement does the check and the claim, so two volunteers cannot both win.
   const res = await c.db
     .prepare(
-      "UPDATE people SET assigned_to = ?, notify_pending = 0, updated_at = ? WHERE id = ? AND assigned_to IS NULL AND status != 'cured'",
+      "UPDATE people SET assigned_to = ?, notify_pending = 0, updated_at = ? WHERE id = ? AND assigned_to IS NULL AND status != 'cured' AND do_not_contact = 0",
     )
     .bind(c.me.id, c.now, id)
     .run();
   if (res.meta.changes === 0) {
     const row = await personRow(c, id);
     if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
+    if (row.do_not_contact === 1) throw new HttpError(409, `${nameOf(row)} asked not to be contacted`);
     if (row.assigned_to === c.me.id) return json(toPerson(row, c.today));
     const other = row.assigned_to === null ? null : await volunteerById(c, row.assigned_to);
     throw new HttpError(409, `${nameOf(row)} was just claimed by ${other ? other.name || other.email : 'someone else'}`);
@@ -570,6 +574,7 @@ async function setStatus(c: Ctx, p: string[], body: Body): Promise<Response> {
   const row = await personRow(c, id);
   mayChange(c, row);
   if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
+  if (row.do_not_contact === 1) throw new HttpError(409, `${nameOf(row)} asked not to be contacted`);
   const said = rawMethod === undefined ? row.contact_method : ((rawMethod as ContactMethod | null) ?? null);
   // A voicemail is a phone call. A text is also filed under this status, so only a method left unsaid becomes a call.
   const method = status === 'left_voicemail' && said === null ? 'call' : said;
@@ -602,6 +607,53 @@ async function addNote(c: Ctx, p: string[], body: Body): Promise<Response> {
     volunteerName: c.me.name || c.me.email,
   };
   return json(note, 201);
+}
+
+// A voter who asked not to be contacted. Their volunteer, an admin or an organizer of their precinct marks them; they leave that volunteer's list and every pool,
+// map, count and export at once, and nobody can claim them or be given them. An upload never clears the mark. Only someone who organizes their
+// precinct can take it off again (allowContact). The log says who and when; why is not asked, and the notes stay as they are.
+async function markDoNotContact(c: Ctx, p: string[]): Promise<Response> {
+  const id = idOf(p[0]);
+  const row = await personRow(c, id);
+  // The person's volunteer, an admin, or whoever organizes their precinct (a voter may ask the campaign, not a volunteer).
+  if (c.scope === null || !inScope(c.scope, row.precinct)) mayChange(c, row);
+  if (row.do_not_contact === 1) return json(toPerson(row, c.today));
+  // Marked contacted, they would count as an unsuccessful cure at the next upload that lists them, so the status goes back to the start too.
+  await c.db.batch([
+    c.db
+      .prepare(
+        `UPDATE people SET do_not_contact = 1, assigned_to = NULL, notify_pending = 0, flag = NULL, contacted_cycles = 0,
+           status = CASE WHEN status = 'cured' THEN 'cured' ELSE 'needs_contact' END, updated_at = ? WHERE id = ?`,
+      )
+      .bind(c.now, id),
+    auditStmt(c, 'person.do_not_contact', id, { from: row.assigned_to }),
+  ]);
+  return json(toPerson(await personRow(c, id), c.today));
+}
+
+// Takes the mark off, for a mistake or a voter who changed their mind. They go back to the pool if they are still open.
+async function allowContact(c: Ctx, p: string[]): Promise<Response> {
+  const id = idOf(p[0]);
+  const row = await personRow(c, id);
+  mayOrganize(c, row);
+  if (row.do_not_contact === 0) return json(toPerson(row, c.today));
+  await c.db.batch([
+    c.db.prepare('UPDATE people SET do_not_contact = 0, updated_at = ? WHERE id = ?').bind(c.now, id),
+    auditStmt(c, 'person.allow_contact', id),
+  ]);
+  return json(toPerson(await personRow(c, id), c.today));
+}
+
+// Everyone who asked not to be contacted, in the caller's precincts.
+async function listDoNotContact(c: Ctx): Promise<Response> {
+  const only = scopeWhere(c.scope ?? { all: false, precincts: [] }, 'p.precinct');
+  const { results } = await c.db
+    .prepare(
+      `${PERSON_SELECT} WHERE p.do_not_contact = 1 AND ${only.sql} ORDER BY p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE, p.id`,
+    )
+    .bind(...only.binds)
+    .all<PersonRow>();
+  return json(results.map((r) => toPerson(r, c.today)));
 }
 
 // Deletes a note: its writer or a site admin may. The audit row says which note and whose, never what it said.
@@ -661,7 +713,7 @@ async function adminStats(c: Ctx): Promise<Response> {
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie') AND lat IS NULL), 0) AS nowhere,
          COALESCE(SUM(status != 'cured' AND geocode IN ('no_match', 'tie')), 0) AS unlocated,
          COALESCE(SUM(${HAND_LIST}), 0) AS listed
-       FROM people WHERE ${only.sql}`,
+       FROM people WHERE ${only.sql} AND do_not_contact = 0`,
     )
     .bind(...only.binds)
     .first<{
@@ -679,6 +731,10 @@ async function adminStats(c: Ctx): Promise<Response> {
       unlocated: number;
       listed: number;
     }>();
+  const asked = await c.db
+    .prepare(`SELECT COUNT(*) AS n FROM people WHERE do_not_contact = 1 AND ${only.sql}`)
+    .bind(...only.binds)
+    .first<{ n: number }>();
   const sample = c.isAdmin ? (await waitingForGeocode(c.db, 0, 3)).map(censusLine) : [];
   const volunteers = await c.db
     .prepare(
@@ -706,7 +762,9 @@ async function adminStats(c: Ctx): Promise<Response> {
       flagged: number;
     }>();
   const flagged = await c.db
-    .prepare(`${PERSON_SELECT} WHERE p.flag IS NOT NULL AND p.status != 'cured' AND ${onlyP.sql} ORDER BY p.status_changed_at DESC, p.id`)
+    .prepare(
+      `${PERSON_SELECT} WHERE p.flag IS NOT NULL AND p.status != 'cured' AND p.do_not_contact = 0 AND ${onlyP.sql} ORDER BY p.status_changed_at DESC, p.id`,
+    )
     .bind(...onlyP.binds)
     .all<PersonRow>();
   const last = c.isAdmin
@@ -724,6 +782,7 @@ async function adminStats(c: Ctx): Promise<Response> {
       cured: totals?.cured ?? 0,
       unassigned: totals?.unassigned ?? 0,
       flagged: totals?.flagged ?? 0,
+      doNotContact: asked?.n ?? 0,
     },
     volunteers: volunteers.results.map(
       (v): VolunteerStats => ({
@@ -1023,6 +1082,7 @@ async function assign(c: Ctx, p: string[], body: Body): Promise<Response> {
   const row = await personRow(c, id);
   mayOrganize(c, row);
   if (row.status === 'cured') throw new HttpError(409, `${nameOf(row)} is already cured`);
+  if (to !== null && row.do_not_contact === 1) throw new HttpError(409, `${nameOf(row)} asked not to be contacted`);
   if (to !== null) await volunteerById(c, to);
   // Someone else's list gets a new person: mark it, so the admin page offers to tell them. Giving a person to the volunteer who has them
   // already changes nothing, and giving to yourself or the pool clears the mark.
@@ -1181,7 +1241,7 @@ async function exportWorked(c: Ctx): Promise<Response> {
     .prepare(
       `SELECT p.id, p.first_name, p.middle_name, p.last_name, p.status, COALESCE(NULLIF(v.name, ''), v.email, '') AS volunteer
        FROM people p LEFT JOIN volunteers v ON v.id = p.assigned_to
-       WHERE p.status != 'cured' AND ${only.sql}
+       WHERE p.status != 'cured' AND p.do_not_contact = 0 AND ${only.sql}
          AND (p.status != 'needs_contact' OR EXISTS (SELECT 1 FROM notes n WHERE n.person_id = p.id))
        ORDER BY p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE, p.id`,
     )
@@ -1191,7 +1251,7 @@ async function exportWorked(c: Ctx): Promise<Response> {
     .prepare(
       `SELECT n.person_id, n.body, n.created_at, v.name, v.email FROM notes n
        JOIN volunteers v ON v.id = n.volunteer_id JOIN people p ON p.id = n.person_id
-       WHERE p.status != 'cured' AND ${only.sql} ORDER BY n.created_at, n.id`,
+       WHERE p.status != 'cured' AND p.do_not_contact = 0 AND ${only.sql} ORDER BY n.created_at, n.id`,
     )
     .bind(...only.binds)
     .all<{ person_id: number; body: string; created_at: string; name: string; email: string }>();
@@ -1324,6 +1384,7 @@ const routes: Route[] = [
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/release$/, level: 'volunteer', handler: release },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/status$/, level: 'volunteer', handler: setStatus },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/notes$/, level: 'volunteer', handler: addNote },
+  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/do-not-contact$/, level: 'volunteer', handler: markDoNotContact },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/notes\/(\d+)\/remove$/, level: 'volunteer', handler: removeNote },
   { method: 'POST', pattern: /^\/api\/feedback$/, level: 'volunteer', handler: postFeedback },
   { method: 'GET', pattern: /^\/api\/admin\/stats$/, level: 'organizer', handler: adminStats },
@@ -1353,6 +1414,8 @@ const routes: Route[] = [
   { method: 'POST', pattern: /^\/api\/admin\/uploads\/stage\/finish$/, level: 'admin', handler: uploadFinish },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/assign$/, level: 'organizer', handler: assign },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/place$/, level: 'admin', handler: placePerson },
+  { method: 'GET', pattern: /^\/api\/admin\/do-not-contact$/, level: 'organizer', handler: listDoNotContact },
+  { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/allow-contact$/, level: 'organizer', handler: allowContact },
   { method: 'POST', pattern: /^\/api\/admin\/people\/(\d+)\/dismiss-flag$/, level: 'organizer', handler: dismissFlag },
   { method: 'POST', pattern: /^\/api\/admin\/volunteers\/(\d+)\/reassign$/, level: 'organizer', handler: reassignAll },
 ];

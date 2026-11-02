@@ -56,6 +56,8 @@ export interface Person {
   contactMethod: ContactMethod | null;
   assignedTo: number | null;
   flag: Flag | null;
+  // The voter asked not to be contacted: nobody can claim them, and no list or count has them (see the admin page's list).
+  doNotContact: boolean;
   notesCount: number;
   // Only in a "within N miles" search: how far, and whether that is a guess (the person has the middle of their ZIP, not their own place).
   distanceMiles?: number;
@@ -136,6 +138,8 @@ export interface AdminStats {
     // Open people nobody has claimed.
     unassigned: number;
     flagged: number;
+    // People who asked not to be contacted: counted here and in no other number.
+    doNotContact: number;
   };
   volunteers: VolunteerStats[];
   flagged: Person[];

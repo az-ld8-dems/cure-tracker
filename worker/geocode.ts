@@ -47,7 +47,7 @@ export async function waitingForGeocode(db: Db, after: number, limit: number, re
   const { results } = await db
     .prepare(
       `SELECT id, address, city, zip FROM people
-       WHERE id > ?1 AND status != 'cured' AND (geocode IS NULL OR (?3 = 1 AND geocode IN ('no_match', 'tie'))) ORDER BY id LIMIT ?2`,
+       WHERE id > ?1 AND status != 'cured' AND do_not_contact = 0 AND (geocode IS NULL OR (?3 = 1 AND geocode IN ('no_match', 'tie'))) ORDER BY id LIMIT ?2`,
     )
     .bind(after, limit, retry ? 1 : 0)
     .all<Waiting>();
@@ -236,7 +236,7 @@ interface UnplacedRow {
 
 // Who the admin's hand-place list holds: open people the geocoder could not place, and open people it placed only roughly (a Non_Exact match,
 // which can land well off) or that an admin placed by hand, so a wrong guess can be corrected.
-export const HAND_LIST = `status != 'cured' AND (geocode IN ('no_match', 'tie') OR (geocode = 'match' AND (approximate = 1 OR placed_by IS NOT NULL)))`;
+export const HAND_LIST = `status != 'cured' AND do_not_contact = 0 AND (geocode IN ('no_match', 'tie') OR (geocode = 'match' AND (approximate = 1 OR placed_by IS NOT NULL)))`;
 
 // That list, 50 at a time after `after`, optionally only the people whose name or address contains `like` (a LIKE pattern, ESCAPE '\').
 // `approximate` says they have a guess for now.
