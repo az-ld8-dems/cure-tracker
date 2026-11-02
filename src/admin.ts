@@ -76,6 +76,7 @@ if (me && !me.isAdmin && !me.organizes) {
     notices: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-notices' }),
     geocode: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-geocode' }),
     flagged: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-flagged' }),
+    asked: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-asked' }),
     volunteers: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-volunteers' }),
     invites: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-invites' }),
     find: h('section', { class: 'fl-stack fl-stack--3', 'aria-labelledby': 'h-find' }),
@@ -1053,6 +1054,7 @@ if (me && !me.isAdmin && !me.organizes) {
         [t.leftVoicemail, 'Left a message'],
         [t.contacted, 'Contacted'],
         [t.cured, 'Cured'],
+        [t.doNotContact, 'Asked not to be contacted'],
       ),
       h(
         'p',
@@ -1191,7 +1193,68 @@ if (me && !me.isAdmin && !me.organizes) {
     }
   }
 
+  // ---- voters who asked not to be contacted
+  function askedSection(people: Person[]): void {
+    clear(
+      sections.asked,
+      heading('h-asked', `Asked not to be contacted (${people.length})`),
+      people.length === 0
+        ? h(
+            'p',
+            { class: 'fl-help' },
+            'Nobody. A volunteer marks a voter who asks them to stop from My people, and you can mark anyone below. A marked voter stays off every list, the map and the export, whatever the next upload says.',
+          )
+        : table(
+            'People who asked not to be contacted',
+            ['Person', 'Precinct', ''],
+            people.map((p) => {
+              const allow = h('button', { class: 'fl-btn fl-btn--sm', type: 'button' }, 'Allow contact again');
+              window.Frostline.confirm(allow, {
+                message: `Put ${personName(p)} back on the list?`,
+                confirmLabel: 'Put them back',
+                cancelLabel: 'Keep them off',
+                onConfirm: async () => {
+                  try {
+                    await api<Person>('POST', `/api/admin/people/${p.id}/allow-contact`, {});
+                    toast(`${personName(p)} can be contacted again.`);
+                    await refresh();
+                  } catch (e) {
+                    toast(failureText(e), 'error');
+                  }
+                },
+              });
+              return [
+                h('span', {}, personName(p), h('br', {}), h('span', { class: 'fl-help' }, addressText(p.address))),
+                p.precinct || 'Unknown',
+                allow,
+              ];
+            }),
+          ),
+    );
+  }
+
   // ---- find someone and move them
+  // The button that marks a voter as asking not to be contacted, behind an in-place yes or no.
+  function askedButton(p: Person): HTMLElement {
+    const button = h('button', { class: 'fl-btn fl-btn--sm', type: 'button' }, 'Do not contact');
+    button.setAttribute('aria-label', `Do not contact ${personName(p)}`);
+    window.Frostline.confirm(button, {
+      message: `${personName(p)} asked not to be contacted?`,
+      confirmLabel: 'Yes, never contact',
+      cancelLabel: 'Cancel',
+      onConfirm: async () => {
+        try {
+          await api<Person>('POST', `/api/people/${p.id}/do-not-contact`, {});
+          toast(`${personName(p)} is off the list for good.`);
+          await refresh();
+        } catch (e) {
+          toast(failureText(e), 'error');
+        }
+      },
+    });
+    return button;
+  }
+
   function findSection(): void {
     let pause: ReturnType<typeof setTimeout> | undefined;
     const q = h('input', {
@@ -1228,17 +1291,18 @@ if (me && !me.isAdmin && !me.organizes) {
           ? h('p', { class: 'fl-help' }, 'Nobody matches.')
           : table(
               'People found',
-              ['Person', 'Status', 'Volunteer', 'Move to'],
+              ['Person', 'Status', 'Volunteer', 'Move to', ''],
               found.map((p) => {
                 const move = volunteerSelect(`assign-${p.id}`, p.assignedTo, 'Nobody (the pool)');
                 move.setAttribute('aria-label', `Move ${personName(p)}`);
-                move.disabled = p.status === 'cured';
+                move.disabled = p.status === 'cured' || p.doNotContact;
                 move.addEventListener('change', () => assign(p, idOrNull(move)));
                 return [
                   h('span', {}, personName(p), h('br', {}), h('span', { class: 'fl-help' }, addressText(p.address))),
-                  statusLabel(p.status),
+                  p.doNotContact ? 'Asked not to be contacted' : statusLabel(p.status),
                   p.assignedTo === null ? 'Nobody' : volunteerName(volunteers.get(p.assignedTo)),
                   move,
+                  p.doNotContact ? '' : askedButton(p),
                 ];
               }),
             ),
@@ -1462,11 +1526,12 @@ if (me && !me.isAdmin && !me.organizes) {
   }
 
   async function refresh(): Promise<void> {
-    const [stats, vols, notices, missing, firstPage, settings, organizers, invites] = await Promise.all([
+    const [stats, vols, notices, missing, asked, firstPage, settings, organizers, invites] = await Promise.all([
       api<AdminStats>('GET', '/api/admin/stats'),
       loadVolunteers(),
       api<NoticeList>('GET', '/api/admin/notices'),
       api<MissingPhonePage>('GET', '/api/admin/phones/missing?after=0'),
+      api<Person[]>('GET', '/api/admin/do-not-contact'),
       siteAdmin ? api<AuditEntry[]>('GET', '/api/admin/audit?limit=50') : null,
       siteAdmin ? api<AdminSettings>('GET', '/api/admin/settings') : null,
       siteAdmin ? api<OrganizerList>('GET', '/api/admin/organizers') : null,
@@ -1477,6 +1542,7 @@ if (me && !me.isAdmin && !me.organizes) {
     noticesSection(notices);
     phonesSection(missing.total);
     flaggedSection(stats);
+    askedSection(asked);
     volunteersSection(stats);
     findSection();
     exportSection();
@@ -1495,7 +1561,7 @@ if (me && !me.isAdmin && !me.organizes) {
 
   // The page is four tabs, so each job has its own screen. An organizer sees the first two, with only the parts that are theirs.
   const TABS: { id: string; label: string; admin: boolean; parts: (keyof typeof sections)[] }[] = [
-    { id: 'overview', label: 'Overview', admin: false, parts: ['stats', 'notices', 'flagged', 'volunteers', 'find'] },
+    { id: 'overview', label: 'Overview', admin: false, parts: ['stats', 'notices', 'flagged', 'asked', 'volunteers', 'find'] },
     { id: 'data', label: 'People data', admin: false, parts: ['upload', 'geocode', 'phones', 'exported'] },
     { id: 'access', label: 'Access', admin: true, parts: ['organizers', 'invites'] },
     { id: 'system', label: 'Settings and log', admin: true, parts: ['settings', 'reset', 'audit'] },

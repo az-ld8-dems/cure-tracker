@@ -332,6 +332,20 @@ for (const m of ['call_and_text', 'voicemail_and_text', 'in_person', 'in_person_
 }
 await ok(vera, 'POST', `/api/people/${p1.id}/status`, { status: 'left_voicemail', method: 'call' });
 
+// A note comes off by its writer or an admin, and the log keeps that it happened but never what it said.
+const oops = await ok<{ id: number }>(vera, 'POST', `/api/people/${p1.id}/notes`, { body: 'Wrong voter, sorry.' });
+assert.equal((await call(walt, 'POST', `/api/people/${p1.id}/notes/${oops.id}/remove`, {})).status, 403, 'another volunteer may not');
+assert.equal((await call(vera, 'POST', `/api/people/${p2.id}/notes/${oops.id}/remove`, {})).status, 404, 'the note must be the person’s');
+assert.equal((await call(vera, 'POST', `/api/people/${p1.id}/notes/999999/remove`, {})).status, 404);
+await ok(vera, 'POST', `/api/people/${p1.id}/notes/${oops.id}/remove`, {});
+assert.equal((await ok<PersonDetail>(vera, 'GET', `/api/people/${p1.id}`)).person.notesCount, 2, 'the note is gone');
+assert.equal((await call(vera, 'POST', `/api/people/${p1.id}/notes/${oops.id}/remove`, {})).status, 404, 'and cannot be removed twice');
+const adminNote = await ok<{ id: number }>(admin, 'POST', `/api/people/${p1.id}/notes`, { body: 'Another admin note.' });
+await ok('second@example.com', 'POST', `/api/people/${p1.id}/notes/${adminNote.id}/remove`, {});
+const removals = sqlite.prepare("SELECT detail FROM audit WHERE action = 'note.remove' ORDER BY id").all();
+assert.equal(removals.length, 2);
+assert.ok(!JSON.stringify(removals).includes('Wrong voter'), 'the audit row never holds the note’s text');
+
 const winner = race[0]?.status === 200 ? vera : walt;
 const released = await ok<Person>(winner, 'POST', `/api/people/${p2.id}/release`, {});
 assert.equal(released.assignedTo, null);

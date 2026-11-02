@@ -68,6 +68,10 @@ The admin picks the file and presses **Check the file**. The browser reads the C
 3. A person who is not on the sheet and not yet Cured becomes **Cured**. They keep their volunteer, so the credit stays.
 4. A volunteer answering the flag (changing the status) or an admin dismissing it clears it.
 
+**Notes** can be removed by the volunteer who wrote them or by a site admin (a button on the note, with an in-place yes or no). The note is deleted; the audit log keeps that a note was removed, and by whom, but never what it said.
+
+**Do not contact.** A voter who asks to be left alone is marked by their volunteer (the *Do not contact* button on their card), by a site admin, or by an organizer of their precinct (from *Find someone*). The mark is the `people.do_not_contact` column and no upload ever changes it: a changed row, a cure, or a return to the sheet leaves it as it was. A marked person goes back to Needs to be contacted (so a later upload cannot call them an unsuccessful cure), loses their volunteer and their flag, and is in no pool, map, count, export, phone list, hand-place list or geocoder request; nobody can claim them, be given them, or change their status. Their notes stay. An organizer of the precinct (or a site admin) lists everyone marked under **Asked not to be contacted** on the Overview tab and can allow contact again. The match is by the sheet's key (name and address): if the sheet lists the same name at a new address, that is a new person, and the upload's preview warns about it; the possible-match list, when the old row has left the sheet, lets an admin merge them, which keeps the mark.
+
 Safeguards:
 - A file that would cure more than half of at least ten open people is probably a partial export. The upload is refused unless the admin ticks "Upload it anyway".
 - A new person who looks like someone who just disappeared is listed as a **possible match**: the same last name and address with another first name, the same first name and address with another last name, or the same name at another address. The match is by the normalized key, not by similarity: a typo in two of the three parts, a nickname, or `ST` against `STREET` is not found. Each listed pair has a **same person** box. Ticking it (the Worker keeps the marks with the staged sheet and works the counts out again) makes the upload re-key the old record to the sheet's key and update it, instead of curing it and adding the new one as a stranger: the record keeps its id, notes, volunteer, status and history, and an `import.merged` audit row says who they were. Unticked, nothing is merged, as before.
@@ -96,7 +100,7 @@ The map is a canvas. Its pins cannot be reached with a keyboard or a screen read
 
 ## Audit log
 
-Every change writes a row: who, when, what, which person. Joining, renaming, claims, releases, status changes, notes, assignments, reassignments, flag dismissals, uploads and what each upload cured, flagged or reopened. Admins read it newest first on the admin page.
+Every change writes a row: who, when, what, which person. Joining, renaming, claims, releases, status changes, notes (and removing one), do-not-contact marks, assignments, reassignments, flag dismissals, uploads and what each upload cured, flagged or reopened. Admins read it newest first on the admin page.
 
 ## Limits and things not built
 

@@ -20,7 +20,7 @@ export function normalizePhone(raw: string): string | null {
 // after `after`, optionally only those whose name or address matches `like` (a LIKE pattern, ESCAPE '\'). `total` counts the whole list.
 export async function missingPhones(db: Db, scope: Scope, after: number, like: string): Promise<MissingPhonePage> {
   const only = scopeWhere(scope, 'precinct');
-  const listed = `status != 'cured' AND (phone = '' OR phone_by IS NOT NULL) AND ${only.sql}`;
+  const listed = `status != 'cured' AND do_not_contact = 0 AND (phone = '' OR phone_by IS NOT NULL) AND ${only.sql}`;
   const { results } = await db
     .prepare(
       `SELECT id, first_name, last_name, address, precinct, phone, phone_by FROM people

@@ -296,6 +296,19 @@ const LOOKS_THE_SAME = (p: string, s: string) =>
   `(${LAST_ADDRESS(`${p}.key`)} = ${LAST_ADDRESS(`${s}.key`)} OR ${FIRST_LAST(`${p}.key`)} = ${FIRST_LAST(`${s}.key`)}
     OR ${FIRST_ADDRESS(`${p}.key`)} = ${FIRST_ADDRESS(`${s}.key`)})`;
 
+// People on the sheet that nobody here has, who share a first and last name with someone who asked not to be contacted: the same voter at a
+// new address, perhaps. Nothing is held back (a common name would drop real voters); the preview says so, and an admin can mark the person.
+async function sameNameAsAsked(db: Db): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM upload_rows s
+       WHERE NOT EXISTS (SELECT 1 FROM people p WHERE p.key = s.key) AND NOT EXISTS (SELECT 1 FROM upload_merges m WHERE m.new_key = s.key)
+         AND EXISTS (SELECT 1 FROM people d WHERE d.do_not_contact = 1 AND ${FIRST_LAST('d.key')} = ${FIRST_LAST('s.key')})`,
+    )
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
 // Someone who disappears while a similar person appears may be one person whose record was corrected, who would otherwise be cured and
 // re-added as a stranger (losing their notes and volunteer). These are listed, by the keys as they are, whether or not an admin has
 // marked them as the same person (merged); a merge is what changes the upload.
@@ -366,7 +379,7 @@ async function findMatches(db: Db, counts: Counts): Promise<Found> {
   };
 }
 
-function previewOf(stage: StageRow, counts: Counts, found: Found): UploadPreview {
+function previewOf(stage: StageRow, counts: Counts, found: Found, askedNot: number): UploadPreview {
   const looksPartial = counts.open_before >= 10 && counts.cured > counts.open_before / 2;
   const warnings: string[] = JSON.parse(stage.warnings);
   if (looksPartial) {
@@ -380,6 +393,11 @@ function previewOf(stage: StageRow, counts: Counts, found: Found): UploadPreview
     );
   }
   if (found.skipped) warnings.push('So many people changed that this check did not look for corrected names.');
+  if (askedNot > 0) {
+    warnings.push(
+      `${askedNot} new ${askedNot > 1 ? 'people have' : 'person has'} the same name as someone on the do-not-contact list (a move, perhaps). They are added as new people, so look at the list on the admin page and mark them if they are the same voter.`,
+    );
+  }
   return {
     rows: stage.rows,
     skippedOtherDistrict: stage.skipped_other_district,
@@ -406,7 +424,7 @@ export async function planStage(db: Db, token: string): Promise<UploadPreview> {
   const counts = await countChanges(db, await graceCycles(db));
   if (counts.staged !== stage.expected)
     throw new StageError(`Only ${counts.staged} of ${stage.expected} people have arrived. Check the file again.`);
-  return previewOf(stage, counts, await findMatches(db, counts));
+  return previewOf(stage, counts, await findMatches(db, counts), await sameNameAsAsked(db));
 }
 
 export interface ApplyOptions {
@@ -432,7 +450,7 @@ export async function finishStage(db: Db, token: string, options: ApplyOptions):
   const counts = await countChanges(db, grace);
   if (counts.staged !== stage.expected)
     throw new StageError(`Only ${counts.staged} of ${stage.expected} people have arrived. Check the file again.`);
-  const preview = previewOf(stage, counts, await findMatches(db, counts));
+  const preview = previewOf(stage, counts, await findMatches(db, counts), await sameNameAsAsked(db));
   if (preview.looksPartial && !force) throw new PartialUploadError(preview.warnings.join(' '));
   const last = await db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM uploads').first<{ id: number }>();
   const id = (last?.id ?? 0) + 1;
