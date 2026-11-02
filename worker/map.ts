@@ -36,7 +36,7 @@ export async function pinsIn(
   const { results } = await db
     .prepare(
       `SELECT p.id, p.lat, p.lon, (p.approximate = 1 OR p.placed_by IS NOT NULL) AS guess FROM people p
-       WHERE p.assigned_to IS NULL AND p.status != 'cured' AND p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?${extra}
+       WHERE p.assigned_to IS NULL AND p.status != 'cured' AND p.do_not_contact = 0 AND p.lat IS NOT NULL AND p.lat BETWEEN ? AND ? AND p.lon BETWEEN ? AND ?${extra}
        ORDER BY p.lat, p.lon LIMIT ?`,
     )
     .bind(box.south, box.north, box.west, box.east, ...narrow.binds, MAX_PINS + 1)

@@ -65,7 +65,7 @@ export async function nearestTown(db: Db, home: Place): Promise<string | null> {
       const { where, away } = nearSql(home, miles);
       const row = await db
         .prepare(
-          `SELECT p.city, p.zip FROM people p WHERE p.assigned_to IS NULL AND p.status != 'cured' AND ${where} ORDER BY ${away}, p.id LIMIT 1`,
+          `SELECT p.city, p.zip FROM people p WHERE p.assigned_to IS NULL AND p.status != 'cured' AND p.do_not_contact = 0 AND ${where} ORDER BY ${away}, p.id LIMIT 1`,
         )
         .first<{ city: string; zip: string }>();
       if (row) return [row.city, row.zip].filter((v) => v !== '').join(' ') || null;
