@@ -2,10 +2,11 @@
 // a return to the sheet) never clears it, and only an organizer takes it off. Synthetic data on the real migrations, as in test-api.ts.
 import assert from 'node:assert/strict';
 import type { AdminStats, PeoplePage, Person, PersonDetail } from '../src/api.d.ts';
+import { finishSheet, mergeAndPlan } from '../src/upload.ts';
 import { type AppEnv, handle } from '../worker/app.ts';
 import { sheetCsv, syntheticPeople } from './lib/sheet.ts';
 import { migratedDb, sqliteD1 } from './lib/sqlite-d1.ts';
-import { previewCsv, type Send, uploadCsv } from './lib/upload-test.ts';
+import { previewCsv, requestOver, type Send, uploadCsv } from './lib/upload-test.ts';
 
 console.warn = () => {};
 console.error = () => {};
@@ -120,6 +121,24 @@ assert.ok(
 const calm = await previewCsv(sendAs(admin), sheetCsv(sheet), { filename: 'day5.csv' });
 assert.ok(!calm.warnings.some((w) => /do-not-contact/.test(w)), `and none without one: ${JSON.stringify(calm.warnings)}`);
 
+// Merged with the same voter at a new address (the possible-match list the admin page shows), the mark comes along.
+const mover = sheet[5];
+assert.ok(mover);
+const moverRow = (await everyone()).find((p) => p.lastName === mover.last && p.firstName === mover.first);
+assert.ok(moverRow);
+await ok(admin, 'POST', `/api/people/${moverRow.id}/do-not-contact`, {});
+const relocated = { ...mover, address: '9 Elsewhere Court Phoenix AZ 85002' };
+const staged = await previewCsv(sendAs(admin), sheetCsv(sheet.map((p) => (p === mover ? relocated : p))), { filename: 'day6.csv' });
+const pair = staged.possibleMatches.find((m) => m.existing.id === moverRow.id);
+assert.ok(pair, 'the moved voter is offered as a possible match');
+await mergeAndPlan(staged.token, [{ id: moverRow.id, key: pair.incoming.key }], requestOver(sendAs(admin)));
+await finishSheet(staged.token, false, requestOver(sendAs(admin)));
+const kept = (await everyone()).find((p) => p.id === moverRow.id);
+assert.equal(kept?.address.includes('Elsewhere'), true, 'the record moved to the new address');
+assert.equal(kept?.doNotContact, true, 'and still asked not to be contacted');
+assert.equal((await everyone()).filter((p) => p.lastName === mover.last && p.firstName === mover.first).length, 1, 'no second record');
+assert.ok(!(await pool()).some((p) => p.id === moverRow.id));
+
 // --- the export leaves them out
 await ok(vera, 'POST', `/api/people/${third.id}/claim`, {});
 await ok(vera, 'POST', `/api/people/${third.id}/notes`, { body: 'Will call back.' });
@@ -138,7 +157,7 @@ assert.ok(
   (await pool()).some((p) => p.id === first.id),
   'back in the pool',
 );
-assert.equal((await stats()).totals.doNotContact, 1);
+assert.equal((await stats()).totals.doNotContact, 2, 'the other two who asked are still off');
 await ok(walt, 'POST', `/api/people/${first.id}/claim`, {});
 const actions = sqlite.prepare("SELECT action FROM audit WHERE person_id = ? AND action LIKE 'person.%' ORDER BY id").all(first.id);
 assert.deepEqual(
