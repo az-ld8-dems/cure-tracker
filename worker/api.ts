@@ -604,6 +604,24 @@ async function addNote(c: Ctx, p: string[], body: Body): Promise<Response> {
   return json(note, 201);
 }
 
+// Deletes a note: its writer or a site admin may. The audit row says which note and whose, never what it said.
+async function removeNote(c: Ctx, p: string[]): Promise<Response> {
+  const id = idOf(p[0]);
+  const noteId = idOf(p[1]);
+  await personRow(c, id);
+  const note = await c.db
+    .prepare('SELECT id, volunteer_id FROM notes WHERE id = ? AND person_id = ?')
+    .bind(noteId, id)
+    .first<{ id: number; volunteer_id: number }>();
+  if (!note) throw new HttpError(404, 'No such note');
+  if (!c.isAdmin && note.volunteer_id !== c.me.id) throw new HttpError(403, 'Only the person who wrote a note or an admin can remove it');
+  await c.db.batch([
+    c.db.prepare('DELETE FROM notes WHERE id = ?').bind(noteId),
+    auditStmt(c, 'note.remove', id, { note: noteId, writer: note.volunteer_id }),
+  ]);
+  return json({ removed: noteId });
+}
+
 // ---- feedback: a message to whoever runs the tool, by email
 
 // One a minute per person.
@@ -1306,6 +1324,7 @@ const routes: Route[] = [
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/release$/, level: 'volunteer', handler: release },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/status$/, level: 'volunteer', handler: setStatus },
   { method: 'POST', pattern: /^\/api\/people\/(\d+)\/notes$/, level: 'volunteer', handler: addNote },
+  { method: 'POST', pattern: /^\/api\/people\/(\d+)\/notes\/(\d+)\/remove$/, level: 'volunteer', handler: removeNote },
   { method: 'POST', pattern: /^\/api\/feedback$/, level: 'volunteer', handler: postFeedback },
   { method: 'GET', pattern: /^\/api\/admin\/stats$/, level: 'organizer', handler: adminStats },
   { method: 'GET', pattern: /^\/api\/admin\/audit$/, level: 'admin', handler: adminAudit },

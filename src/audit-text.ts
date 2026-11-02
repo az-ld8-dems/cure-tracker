@@ -32,6 +32,8 @@ export function describeAudit(e: AuditEntry, who: (id: number | null) => string)
       return `marked ${status(d.to)} (was ${status(d.from)})`;
     case 'note':
       return 'added a note';
+    case 'note.remove':
+      return 'removed a note';
     case 'assign':
       return `moved from ${volunteer(d.from)} to ${volunteer(d.to)}`;
     case 'reassign':

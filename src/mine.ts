@@ -184,21 +184,41 @@ if (me) {
 
   function renderNotes(box: HTMLElement, p: Person, detail: PersonDetail, label: HTMLElement): void {
     const items = h('ul', { class: 'notes' });
-    const add = (n: PersonDetail['notes'][number]) =>
-      items.prepend(
+    let count = detail.notes.length;
+    const add = (n: PersonDetail['notes'][number]) => {
+      const item = h(
+        'li',
+        {},
+        n.body,
         h(
-          'li',
+          'small',
           {},
-          n.body,
-          h(
-            'small',
-            {},
-            `${n.volunteerName}, ${new Date(n.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Phoenix' })}`,
-          ),
+          `${n.volunteerName}, ${new Date(n.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Phoenix' })}`,
         ),
       );
+      // The server lets a note's writer or an admin remove it; the button is for the same people.
+      if (me?.isAdmin || n.volunteerId === me?.id) {
+        const remove = h('button', { class: 'fl-btn fl-btn--sm', type: 'button', 'aria-label': 'Remove this note' }, 'Remove');
+        window.Frostline.confirm(remove, {
+          message: 'Remove this note?',
+          confirmLabel: 'Remove it',
+          cancelLabel: 'Keep it',
+          onConfirm: async () => {
+            try {
+              await api('POST', `/api/people/${p.id}/notes/${n.id}/remove`, {});
+              item.remove();
+              label.textContent = `Notes (${--count})`;
+              toast('Note removed.');
+            } catch (e) {
+              toast(failureText(e), 'error');
+            }
+          },
+        });
+        item.append(remove);
+      }
+      items.prepend(item);
+    };
     for (const n of [...detail.notes].reverse()) add(n);
-    let count = detail.notes.length;
     const text = h('textarea', { class: 'fl-textarea', id: `note-${p.id}`, maxlength: 2000, rows: 3 });
     const form = h(
       'form',
