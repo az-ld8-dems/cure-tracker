@@ -892,7 +892,7 @@ if (me && !me.isAdmin && !me.organizes) {
               {
                 class: 'fl-btn fl-btn--sm',
                 type: 'button',
-                'aria-label': `Take away the place of ${p.name}`,
+                'aria-label': `Clear the place of ${p.name}`,
                 onclick: () => void placeByHand(p, { clear: true }, `Took away the place of ${p.name}.`),
               },
               'Clear',
@@ -1430,7 +1430,7 @@ if (me && !me.isAdmin && !me.organizes) {
               {
                 class: 'fl-btn fl-btn--sm',
                 type: 'button',
-                'aria-label': `Take away the phone number of ${p.name}`,
+                'aria-label': `Clear the phone number of ${p.name}`,
                 onclick: () => void save(p, { clear: true }, `Took away the phone number of ${p.name}.`),
               },
               'Clear',

@@ -43,13 +43,13 @@
     "test:format": "node tools/test-format.ts"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.13.0",
-    "@biomejs/biome": "2.5.15",
+    "@axe-core/playwright": "4.14.0",
+    "@biomejs/biome": "2.6.3",
     "@protomaps/basemaps": "5.7.2",
     "@types/node": "24.19.2",
     "lighthouse": "13.5.0",
     "maplibre-gl": "6.16.0",
-    "playwright": "1.64.0",
+    "playwright": "1.64.1",
     "pmtiles": "4.5.0",
     "typescript": "7.0.2",
     "wrangler": "4.153.0"

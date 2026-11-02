@@ -394,7 +394,7 @@ try {
   await handRow.getByLabel('Latitude and longitude for Nora Nowhere').fill('somewhere near Tempe');
   await handRow.getByRole('button', { name: 'Set the place of Nora Nowhere' }).click();
   await admin.getByText(/Write latitude, then longitude/).waitFor();
-  await handRow.getByRole('button', { name: 'Take away the place of Nora Nowhere' }).click();
+  await handRow.getByRole('button', { name: 'Clear the place of Nora Nowhere' }).click();
   await admin.getByText('Took away the place of Nora Nowhere.').waitFor();
   // The toast comes before the list is asked again, so wait for the row to change rather than read it at once.
   await unplacedTable
@@ -420,7 +420,7 @@ try {
   await phoneTable
     .getByRole('row')
     .nth(1)
-    .getByRole('button', { name: /^Take away the phone number of / })
+    .getByRole('button', { name: /^Clear the phone number of / })
     .waitFor();
 
   // The grace period saves, and shows after a reload.
