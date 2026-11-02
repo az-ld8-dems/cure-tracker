@@ -4,6 +4,7 @@ This repo is the ballot cure tracker for the LD8 Democrats: it assigns volunteer
 
 ## Git and publishing
 - Work on a branch and open a pull request with `gh pr create`. Never push to `main`, never merge, never change repository rules. Avi reviews and merges.
+- Before starting work, and again before pushing, check whether the current branch's pull request has already merged (`git fetch`, then `gh pr list --head <branch> --state all`). If it has, branch fresh from `origin/main`; never commit onto or push a merged branch.
 - Committing needs no prior approval. Commit as you go, in small, well-named commits.
 - Push the branch, and open or update a pull request, only when Avi gives the go-ahead. Never push on your own, not even once per finished task: say what is committed and unpushed, and wait. CI minutes are billed. When Avi says go, push once and stop after the PR is open (or updated).
 - The GitHub App cannot push under `.github/workflows/`. Put workflow drafts in `ci-proposed/`; Avi moves them. Give Avi the exact move commands, what to review, and anything to create by hand, in the conversation. Pin third-party actions by full commit SHA only when the SHA is verified, with minimal `permissions`. After Avi moves a file, delete its draft from `ci-proposed/`.
