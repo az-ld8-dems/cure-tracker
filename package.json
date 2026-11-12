@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
-    "@biomejs/biome": "2.6.3",
+    "@biomejs/biome": "2.6.5",
     "@protomaps/basemaps": "5.7.2",
     "@types/node": "24.19.2",
     "lighthouse": "13.6.0",
